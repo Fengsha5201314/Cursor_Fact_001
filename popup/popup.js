@@ -145,6 +145,36 @@ function addEventListeners() {
     });
   });
   
+  // 添加刷新扫描按钮事件
+  document.getElementById('btn-refresh-scan').addEventListener('click', function(e) {
+    e.preventDefault();
+    
+    console.log('刷新扫描按钮点击');
+    
+    // 显示加载状态
+    const refreshButton = document.getElementById('btn-refresh-scan');
+    const originalText = refreshButton.textContent || '刷新扫描';
+    refreshButton.textContent = '正在刷新...';
+    refreshButton.classList.add('loading');
+    refreshButton.disabled = true;
+    
+    // 通知内容脚本刷新扫描
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, { 
+          action: 'refreshScan'
+        }, () => {
+          // 延迟恢复按钮状态，确保用户能看到变化
+          setTimeout(() => {
+            refreshButton.textContent = originalText;
+            refreshButton.classList.remove('loading');
+            refreshButton.disabled = false;
+          }, 1000);
+        });
+      }
+    });
+  });
+  
   // 筛选模式按钮 - 直接应用设置
   document.querySelectorAll('#btn-all, #btn-chinese, #btn-others').forEach(button => {
     button.addEventListener('click', async function(e) {

@@ -454,3 +454,36 @@ body {
 .cyberpunk-container::after {
   pointer-events: none;
 }
+
+/* 添加刷新按钮的loading样式 */
+.cyberpunk-button.loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+.cyberpunk-button.loading::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  top: 50%;
+  right: 10px;
+  margin-top: -10px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: button-spinner 0.8s linear infinite;
+}
+
+@keyframes button-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 禁用按钮样式 */
+.cyberpunk-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}

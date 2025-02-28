@@ -1,0 +1,555 @@
+/**
+ * Amazon中国卖家识别器 - 高级设置样式
+ * 赛博朋克风格UI
+ */
+
+:root {
+  --highlight-color: #ff0055;
+  --secondary-color: #00f3ff;
+  --tertiary-color: #ffcc00;
+  --dark-bg: #111111;
+  --light-text: #ffffff;
+  --dark-text: #000000;
+  --glow-intensity: 5px;
+  --border-width: 1px;
+  --animation-speed: 0.3s;
+}
+
+/* 基础样式 */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--dark-bg);
+  color: var(--light-text);
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  letter-spacing: 0.5px;
+  min-height: 100vh;
+}
+
+.cyberpunk-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+  position: relative;
+}
+
+/* 背景网格效果 */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    linear-gradient(rgba(17, 17, 17, 0.9), rgba(17, 17, 17, 0.9)),
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255, 0, 85, 0.1) 2px, rgba(255, 0, 85, 0.1) 4px);
+  z-index: -1;
+}
+
+/* 扫描线动画 */
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--highlight-color), transparent);
+  animation: scan-line 4s linear infinite;
+  z-index: 1000;
+}
+
+/* 标题区域 */
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 30px;
+  position: relative;
+}
+
+.logo {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  margin-right: 20px;
+}
+
+.logo-icon {
+  width: 100%;
+  height: 100%;
+  background: var(--highlight-color);
+  color: var(--dark-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 22px;
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 15px var(--highlight-color);
+}
+
+.logo-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  box-shadow: 0 0 20px var(--highlight-color);
+  animation: pulse 2s infinite;
+}
+
+.title h1 {
+  margin: 0 0 5px 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--highlight-color);
+  text-shadow: 0 0 5px var(--highlight-color);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.subtitle {
+  font-size: 14px;
+  opacity: 0.7;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* 内容面板 */
+.content-panel {
+  margin-bottom: 30px;
+}
+
+.panel-section {
+  background: rgba(0, 0, 0, 0.5);
+  border: var(--border-width) solid var(--highlight-color);
+  margin-bottom: 20px;
+  box-shadow: 0 0 var(--glow-intensity) var(--highlight-color);
+  position: relative;
+  overflow: hidden;
+}
+
+.panel-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(45deg, rgba(255, 0, 85, 0.03), rgba(255, 0, 85, 0.03) 10px, transparent 10px, transparent 20px);
+  pointer-events: none;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  padding: 15px;
+  border-bottom: 1px solid var(--highlight-color);
+}
+
+.section-title {
+  color: var(--highlight-color);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 16px;
+  text-shadow: 0 0 5px var(--highlight-color);
+  position: relative;
+  padding-left: 15px;
+}
+
+.section-title::before {
+  content: '>';
+  position: absolute;
+  left: 0;
+  color: var(--highlight-color);
+  animation: blink 1s infinite;
+}
+
+.section-decoration {
+  flex-grow: 1;
+  height: 1px;
+  margin-left: 15px;
+  background: linear-gradient(90deg, var(--highlight-color), transparent);
+  position: relative;
+}
+
+.section-decoration::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -3px;
+  width: 7px;
+  height: 7px;
+  background: var(--highlight-color);
+  box-shadow: 0 0 5px var(--highlight-color);
+  animation: pulse 2s infinite;
+}
+
+.section-content {
+  padding: 20px;
+}
+
+/* 选项组 */
+.option-group {
+  margin-bottom: 25px;
+}
+
+.option-group:last-child {
+  margin-bottom: 0;
+}
+
+.option-label {
+  margin-bottom: 10px;
+  font-size: 14px;
+  text-transform: uppercase;
+  opacity: 0.8;
+  letter-spacing: 1px;
+}
+
+/* 颜色选择器 */
+.color-picker {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.color-option {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all var(--animation-speed) ease;
+  position: relative;
+}
+
+.color-option::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  transition: all var(--animation-speed) ease;
+}
+
+.color-option.active::after {
+  border-color: var(--light-text);
+  box-shadow: 0 0 5px var(--light-text);
+}
+
+.color-option:hover {
+  transform: scale(1.1);
+}
+
+.color-option.custom {
+  background: linear-gradient(135deg, #ff0055, #00f3ff, #ffcc00, #00ff66);
+  overflow: hidden;
+  position: relative;
+}
+
+.color-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* 样式选项 */
+.style-options {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+/* 按钮样式 */
+.cyberpunk-button {
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--highlight-color);
+  color: var(--light-text);
+  padding: 8px 15px;
+  font-size: 14px;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--animation-speed) ease;
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  letter-spacing: 1px;
+  box-shadow: 0 0 3px var(--highlight-color);
+}
+
+.cyberpunk-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: all 0.5s ease;
+}
+
+.cyberpunk-button:hover::before {
+  left: 100%;
+}
+
+.cyberpunk-button:hover,
+.cyberpunk-button.active {
+  background: var(--highlight-color);
+  color: var(--dark-text);
+  box-shadow: 0 0 10px var(--highlight-color);
+}
+
+.cyberpunk-button.small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.cyberpunk-button.danger {
+  border-color: #ff3333;
+}
+
+.cyberpunk-button.danger:hover {
+  background: #ff3333;
+  box-shadow: 0 0 10px #ff3333;
+}
+
+.cyberpunk-button.primary {
+  background: var(--highlight-color);
+  color: var(--dark-text);
+  font-weight: bold;
+}
+
+.button-text {
+  position: relative;
+  z-index: 1;
+}
+
+/* 开关样式 */
+.toggle-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+}
+
+.cyberpunk-toggle {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggle-slider {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--highlight-color);
+  margin-right: 10px;
+  transition: all var(--animation-speed) ease;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--light-text);
+  transition: all var(--animation-speed) ease;
+}
+
+.cyberpunk-toggle input {
+  display: none;
+}
+
+.cyberpunk-toggle input:checked + .toggle-slider {
+  background: var(--highlight-color);
+  box-shadow: 0 0 5px var(--highlight-color);
+}
+
+.cyberpunk-toggle input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+  background: var(--dark-text);
+}
+
+.toggle-text {
+  font-size: 14px;
+}
+
+/* 关键词样式 */
+.keywords-container {
+  margin-bottom: 15px;
+}
+
+.keywords-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+  min-height: 30px;
+}
+
+.keyword-tag {
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--highlight-color);
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+  box-shadow: 0 0 5px rgba(255, 0, 85, 0.3);
+}
+
+.keyword-text {
+  margin-right: 8px;
+}
+
+.keyword-remove {
+  color: var(--highlight-color);
+  font-weight: bold;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all var(--animation-speed) ease;
+}
+
+.keyword-remove:hover {
+  background: var(--highlight-color);
+  color: var(--dark-text);
+}
+
+.keywords-input {
+  display: flex;
+  gap: 10px;
+}
+
+.cyberpunk-input {
+  flex-grow: 1;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--highlight-color);
+  color: var(--light-text);
+  padding: 8px 12px;
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  outline: none;
+  transition: all var(--animation-speed) ease;
+}
+
+.cyberpunk-input:focus {
+  box-shadow: 0 0 5px var(--highlight-color);
+}
+
+/* 滑块样式 */
+.range-option {
+  margin-bottom: 15px;
+}
+
+.cyberpunk-range {
+  width: 100%;
+  margin: 10px 0;
+  -webkit-appearance: none;
+  height: 2px;
+  background: var(--highlight-color);
+  outline: none;
+  opacity: 0.7;
+  transition: opacity var(--animation-speed) ease;
+}
+
+.cyberpunk-range:hover {
+  opacity: 1;
+}
+
+.cyberpunk-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--highlight-color);
+  cursor: pointer;
+  border: 1px solid var(--light-text);
+  box-shadow: 0 0 5px var(--highlight-color);
+}
+
+.cyberpunk-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: var(--highlight-color);
+  cursor: pointer;
+  border: 1px solid var(--light-text);
+  box-shadow: 0 0 5px var(--highlight-color);
+}
+
+/* 导入/导出按钮 */
+.import-export-buttons {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+/* 页脚 */
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 30px;
+}
+
+.save-container {
+  position: relative;
+}
+
+.save-status {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 5px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: all 0.3s ease;
+}
+
+.save-status.success {
+  color: #00ff66;
+  text-shadow: 0 0 5px #00ff66;
+}
+
+.save-status.error {
+  color: #ff3333;
+  text-shadow: 0 0 5px #ff3333;
+}
+
+.version {
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+/* 动画效果 */
+@keyframes pulse {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes scan-line {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}

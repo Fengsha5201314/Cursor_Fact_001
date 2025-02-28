@@ -1,0 +1,456 @@
+/**
+ * Amazon中国卖家识别器 - 弹出窗口样式
+ * 赛博朋克风格UI
+ */
+
+:root {
+  --highlight-color: #ff0055;
+  --secondary-color: #00f3ff;
+  --tertiary-color: #ffcc00;
+  --dark-bg: #111111;
+  --light-text: #ffffff;
+  --dark-text: #000000;
+  --glow-intensity: 5px;
+  --border-width: 1px;
+  --animation-speed: 0.3s;
+}
+
+/* 基础样式 */
+body {
+  width: 320px;
+  margin: 0;
+  padding: 0;
+  background-color: var(--dark-bg);
+  color: var(--light-text);
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  letter-spacing: 0.5px;
+  overflow-x: hidden;
+}
+
+.cyberpunk-container {
+  position: relative;
+  padding: 15px;
+  overflow: hidden;
+}
+
+/* 背景网格效果 */
+.cyberpunk-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    linear-gradient(rgba(17, 17, 17, 0.9), rgba(17, 17, 17, 0.9)),
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255, 0, 85, 0.1) 2px, rgba(255, 0, 85, 0.1) 4px);
+  z-index: -1;
+}
+
+/* 扫描线动画 */
+.cyberpunk-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--highlight-color), transparent);
+  animation: scan-line 4s linear infinite;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* 标题区域 */
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.logo {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  margin-right: 15px;
+}
+
+.logo-icon {
+  width: 100%;
+  height: 100%;
+  background: var(--highlight-color);
+  color: var(--dark-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 18px;
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 10px var(--highlight-color);
+}
+
+.logo-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  box-shadow: 0 0 15px var(--highlight-color);
+  animation: pulse 2s infinite;
+  pointer-events: none;
+}
+
+.title h1 {
+  margin: 0 0 5px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--highlight-color);
+  text-shadow: 0 0 5px var(--highlight-color);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.subtitle {
+  font-size: 12px;
+  opacity: 0.7;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* 状态面板 */
+.status-panel {
+  background: rgba(0, 0, 0, 0.5);
+  border: var(--border-width) solid var(--highlight-color);
+  margin-bottom: 15px;
+  box-shadow: 0 0 var(--glow-intensity) var(--highlight-color);
+  position: relative;
+  overflow: hidden;
+}
+
+.status-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(45deg, rgba(255, 0, 85, 0.03), rgba(255, 0, 85, 0.03) 10px, transparent 10px, transparent 20px);
+  pointer-events: none;
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--highlight-color);
+}
+
+.status-title {
+  color: var(--highlight-color);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 14px;
+  text-shadow: 0 0 5px var(--highlight-color);
+  position: relative;
+  padding-left: 15px;
+}
+
+.status-title::before {
+  content: '>';
+  position: absolute;
+  left: 0;
+  color: var(--highlight-color);
+  animation: blink 1s infinite;
+}
+
+.status-decoration {
+  flex-grow: 1;
+  height: 1px;
+  margin-left: 10px;
+  background: linear-gradient(90deg, var(--highlight-color), transparent);
+  position: relative;
+}
+
+.status-content {
+  padding: 10px;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.status-item:last-child {
+  margin-bottom: 0;
+}
+
+.status-label {
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+.status-value {
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+}
+
+.status-active {
+  color: var(--highlight-color);
+  margin-right: 5px;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  background: var(--highlight-color);
+  border-radius: 50%;
+  box-shadow: 0 0 5px var(--highlight-color);
+  animation: pulse 2s infinite;
+}
+
+/* 控制面板 */
+.control-panel {
+  background: rgba(0, 0, 0, 0.5);
+  border: var(--border-width) solid var(--highlight-color);
+  margin-bottom: 15px;
+  box-shadow: 0 0 var(--glow-intensity) var(--highlight-color);
+  position: relative;
+  overflow: hidden;
+  z-index: 10;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--highlight-color);
+}
+
+.panel-title {
+  color: var(--highlight-color);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 14px;
+  text-shadow: 0 0 5px var(--highlight-color);
+  position: relative;
+  padding-left: 15px;
+}
+
+.panel-title::before {
+  content: '>';
+  position: absolute;
+  left: 0;
+  color: var(--highlight-color);
+  animation: blink 1s infinite;
+}
+
+.panel-decoration {
+  flex-grow: 1;
+  height: 1px;
+  margin-left: 10px;
+  background: linear-gradient(90deg, var(--highlight-color), transparent);
+  position: relative;
+}
+
+.panel-content {
+  padding: 15px;
+  position: relative;
+  z-index: 20;
+}
+
+.control-group {
+  margin-bottom: 15px;
+  position: relative;
+  z-index: 30;
+}
+
+.control-group:last-child {
+  margin-bottom: 0;
+}
+
+.control-label {
+  margin-bottom: 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+/* 按钮样式 */
+.control-buttons {
+  display: flex;
+  gap: 8px;
+  position: relative;
+  z-index: 40;
+}
+
+.cyberpunk-button {
+  background-color: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--highlight-color);
+  color: var(--light-text);
+  padding: 8px 15px;
+  font-size: 14px;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer !important;
+  transition: all var(--animation-speed) ease;
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  letter-spacing: 1px;
+  box-shadow: 0 0 3px var(--highlight-color);
+  z-index: 50;
+  pointer-events: auto !important;
+}
+
+.cyberpunk-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: all 0.5s ease;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.cyberpunk-button:hover::before {
+  left: 100%;
+}
+
+.cyberpunk-button:hover,
+.cyberpunk-button.active {
+  background-color: var(--highlight-color);
+  color: var(--dark-text);
+  box-shadow: 0 0 10px var(--highlight-color);
+}
+
+.button-text {
+  position: relative;
+  z-index: 2;
+}
+
+.full-width {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+/* 颜色选择器 */
+.color-picker {
+  display: flex;
+  gap: 10px;
+  position: relative;
+  z-index: 50;
+}
+
+.color-option {
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  cursor: pointer !important;
+  transition: all var(--animation-speed) ease;
+  position: relative;
+  z-index: 60;
+  pointer-events: auto !important;
+}
+
+.color-option::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  right: -3px;
+  bottom: -3px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  transition: all var(--animation-speed) ease;
+  pointer-events: none;
+}
+
+.color-option.active::after {
+  border-color: var(--light-text);
+  box-shadow: 0 0 5px var(--light-text);
+}
+
+.color-option:hover {
+  transform: scale(1.1);
+}
+
+/* 页脚 */
+.footer {
+  margin-top: 20px;
+  text-align: center;
+  position: relative;
+  z-index: 10;
+}
+
+.version {
+  font-size: 11px;
+  opacity: 0.5;
+  margin-top: 5px;
+}
+
+/* 动画效果 */
+@keyframes pulse {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes scan-line {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* 确保按钮和颜色选择器可点击 */
+#btn-all, #btn-chinese, #btn-others {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 1000;
+}
+
+.color-option {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 1000;
+}
+
+/* 确保确认和取消按钮可点击 */
+#btn-apply, #btn-cancel {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 1000;
+}
+
+/* 确保高级设置按钮可点击 */
+#btn-options {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 1000;
+}
+
+/* 确保筛选模式按钮和颜色选择器的点击区域正确 */
+.filter-actions {
+  position: relative;
+  z-index: 1000;
+  margin-top: 15px;
+}
+
+/* 移除可能干扰点击事件的元素 */
+.cyberpunk-container::before,
+.cyberpunk-container::after {
+  pointer-events: none;
+}

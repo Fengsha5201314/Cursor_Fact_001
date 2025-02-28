@@ -1,0 +1,420 @@
+/**
+ * Amazon中国卖家识别器 - 内容样式
+ * 赛博朋克风格的UI设计
+ */
+
+:root {
+  --highlight-color: #ff0055;
+  --secondary-color: #00f3ff;
+  --tertiary-color: #ffcc00;
+  --dark-bg: #111111;
+  --light-bg: #f5f5f5;
+  --dark-text: #000000;
+  --light-text: #ffffff;
+  --glow-intensity: 5px;
+  --border-width: 1px;
+  --animation-speed: 0.3s;
+}
+
+/* 基础样式覆盖 */
+#cn-seller-filter-controls {
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  letter-spacing: 0.5px;
+  padding: 15px;
+  border: var(--border-width) solid var(--highlight-color);
+  background: linear-gradient(135deg, rgba(17, 17, 17, 0.95), rgba(34, 34, 34, 0.9));
+  box-shadow: 0 0 var(--glow-intensity) var(--highlight-color), inset 0 0 10px rgba(0, 0, 0, 0.5);
+  position: fixed; /* 确保固定定位 */
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  z-index: 9999;
+  border-radius: 0;
+  box-sizing: border-box;
+  transform: none; /* 移除可能的transform */
+  overflow: visible; /* 确保内容可见 */
+}
+
+/* 控制面板容器 */
+.controls-container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* 浮动控制面板样式 */
+#cn-seller-floating-control {
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  letter-spacing: 0.5px;
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10000;
+  width: 60px;
+  overflow: hidden;
+  transition: width 0.3s ease, height 0.3s ease, box-shadow 0.3s ease;
+  border: var(--border-width) solid var(--highlight-color);
+  background: linear-gradient(135deg, rgba(17, 17, 17, 0.95), rgba(34, 34, 34, 0.9));
+  box-shadow: 0 0 var(--glow-intensity) var(--highlight-color), inset 0 0 10px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+#cn-seller-floating-control.expanded {
+  width: 220px;
+}
+
+#cn-seller-floating-control .floating-header {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#cn-seller-floating-control .floating-icon {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--highlight-color);
+  color: var(--dark-bg);
+  font-weight: bold;
+  border-radius: 2px;
+  margin-right: 10px;
+  box-shadow: 0 0 5px var(--highlight-color);
+}
+
+#cn-seller-floating-control .floating-title {
+  color: var(--light-text);
+  font-size: 14px;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#cn-seller-floating-control .floating-content {
+  padding: 10px;
+  display: none;
+}
+
+#cn-seller-floating-control.expanded .floating-content {
+  display: block;
+}
+
+#cn-seller-floating-control .toggle-container {
+  margin-bottom: 10px;
+}
+
+#cn-seller-floating-control .filter-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+#cn-seller-floating-control .action-buttons {
+  display: flex;
+  justify-content: space-between;
+  gap: 5px;
+}
+
+#cn-seller-floating-control .cyberpunk-button.mini {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+#cn-seller-floating-control .floating-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+#cn-seller-floating-control .icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--highlight-color);
+  color: var(--highlight-color);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+#cn-seller-floating-control .icon-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* 固定顶部样式 */
+#cn-seller-filter-controls.fixed-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  transition: transform 0.3s ease;
+}
+
+/* 占位元素样式 */
+#cn-seller-filter-placeholder {
+  height: 0;
+  transition: height 0.3s ease;
+}
+
+/* 控制面板装饰元素 */
+#cn-seller-filter-controls::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--highlight-color), transparent);
+  animation: scan-line 4s linear infinite;
+  z-index: -1;
+}
+
+#cn-seller-filter-controls::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(45deg, rgba(255, 0, 85, 0.05), rgba(255, 0, 85, 0.05) 10px, transparent 10px, transparent 20px);
+  z-index: -1;
+}
+
+/* 控制面板标题 */
+.controls-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--highlight-color);
+  position: relative;
+}
+
+.header-text {
+  color: var(--highlight-color);
+  font-size: 18px;
+  font-weight: 600;
+  text-transform: uppercase;
+  text-shadow: 0 0 5px var(--highlight-color);
+  position: relative;
+  padding-left: 15px;
+}
+
+.header-text::before {
+  content: '>';
+  position: absolute;
+  left: 0;
+  color: var(--highlight-color);
+  animation: blink 1s infinite;
+}
+
+.header-decoration {
+  flex-grow: 1;
+  height: 1px;
+  margin-left: 15px;
+  background: linear-gradient(90deg, var(--highlight-color), transparent);
+  position: relative;
+}
+
+.header-decoration::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -3px;
+  width: 7px;
+  height: 7px;
+  background: var(--highlight-color);
+  box-shadow: 0 0 5px var(--highlight-color);
+  animation: pulse 2s infinite;
+}
+
+/* 关闭按钮样式 */
+.close-button {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--highlight-color);
+  font-size: 24px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-shadow: 0 0 5px var(--highlight-color);
+  z-index: 10002; /* 确保按钮可点击 */
+}
+
+.close-button:hover {
+  transform: scale(1.2);
+  color: var(--light-text);
+}
+
+/* 悬浮按钮样式 */
+.cyberpunk-floating-button {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(17, 17, 17, 0.95), rgba(34, 34, 34, 0.9));
+  border: var(--border-width) solid var(--highlight-color);
+  box-shadow: 0 0 var(--glow-intensity) var(--highlight-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 9999;
+  transition: all 0.3s ease;
+}
+
+.cyberpunk-floating-button:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 15px var(--highlight-color);
+}
+
+.floating-icon {
+  color: var(--highlight-color);
+  font-size: 18px;
+  font-weight: bold;
+  text-shadow: 0 0 5px var(--highlight-color);
+}
+
+/* 按钮样式 */
+.filter-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap; /* 允许按钮换行 */
+}
+
+.cyberpunk-button {
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--highlight-color);
+  color: var(--light-text);
+  padding: 8px 15px;
+  font-size: 14px;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--animation-speed) ease;
+  font-family: 'Rajdhani', 'Arial', sans-serif;
+  letter-spacing: 1px;
+  box-shadow: 0 0 3px var(--highlight-color);
+  z-index: 10001; /* 确保按钮可点击 */
+}
+
+.cyberpunk-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: all 0.5s ease;
+}
+
+.cyberpunk-button:hover::before {
+  left: 100%;
+}
+
+.cyberpunk-button:hover,
+.cyberpunk-button.active {
+  background: var(--highlight-color);
+  color: var(--dark-text);
+  box-shadow: 0 0 10px var(--highlight-color);
+}
+
+.button-text {
+  position: relative;
+  z-index: 1;
+}
+
+/* 确认和取消按钮样式 */
+.filter-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  justify-content: flex-end;
+}
+
+.action-button {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+/* 状态指示器 */
+.scan-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  border-left: 2px solid var(--highlight-color);
+  border: 1px solid var(--highlight-color);
+  box-shadow: 0 0 8px rgba(255, 0, 85, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.scan-status::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 0, 85, 0.1), transparent);
+  animation: scanning-glow 2s infinite;
+}
+
+@keyframes scanning-glow {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+.status-icon {
+  width: 12px;
+  height: 12px;
+  background-color: #00ff66;
+  border-radius: 50%;
+  margin-right: 10px;
+  box-shadow: 0 0 5px #00ff66;
+  animation: pulse 2s infinite;
+}
+
+.status-text {
+  color: var(--light-text);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-right: 10px;
+  flex: 1;
+  font-weight: bold;
+  text-shadow: 0 0 5px var(--highlight-color);
+}
+
+/*

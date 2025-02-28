@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon中国卖家识别器 - 高级设置</title>
+  <link rel="stylesheet" href="options.css">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="cyberpunk-container">
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">CN</div>
+        <div class="logo-glow"></div>
+      </div>
+      <div class="title">
+        <h1>Amazon中国卖家识别器</h1>
+        <div class="subtitle">高级设置面板</div>
+      </div>
+    </div>
+    
+    <div class="content-panel">
+      <div class="panel-section">
+        <div class="section-header">
+          <div class="section-title">外观设置</div>
+          <div class="section-decoration"></div>
+        </div>
+        <div class="section-content">
+          <div class="option-group">
+            <div class="option-label">高亮颜色</div>
+            <div class="color-picker">
+              <div class="color-option" data-color="#ff0055" style="background-color: #ff0055;"></div>
+              <div class="color-option" data-color="#00f3ff" style="background-color: #00f3ff;"></div>
+              <div class="color-option" data-color="#ffcc00" style="background-color: #ffcc00;"></div>
+              <div class="color-option" data-color="#00ff66" style="background-color: #00ff66;"></div>
+              <div class="color-option" data-color="#ff00ff" style="background-color: #ff00ff;"></div>
+              <div class="color-option custom" data-color="custom">
+                <input type="color" id="custom-color" class="color-input">
+              </div>
+            </div>
+          </div>
+          
+          <div class="option-group">
+            <div class="option-label">边框样式</div>
+            <div class="style-options">
+              <button class="cyberpunk-button style-option" data-style="neon">
+                <span class="button-text">霓虹</span>
+              </button>
+              <button class="cyberpunk-button style-option" data-style="solid">
+                <span class="button-text">实线</span>
+              </button>
+              <button class="cyberpunk-button style-option" data-style="dashed">
+                <span class="button-text">虚线</span>
+              </button>
+            </div>
+          </div>
+          
+          <div class="option-group">
+            <div class="option-label">显示选项</div>
+            <div class="toggle-options">
+              <div class="toggle-option">
+                <label class="cyberpunk-toggle">
+                  <input type="checkbox" id="show-icon">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">显示图标</span>
+                </label>
+              </div>
+              <div class="toggle-option">
+                <label class="cyberpunk-toggle">
+                  <input type="checkbox" id="show-border">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">显示边框</span>
+                </label>
+              </div>
+              <div class="toggle-option">
+                <label class="cyberpunk-toggle">
+                  <input type="checkbox" id="animation-enabled">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">启用动画</span>
+                </label>
+              </div>
+              <div class="toggle-option">
+                <label class="cyberpunk-toggle">
+                  <input type="checkbox" id="dark-mode">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">暗黑模式</span>
+                </label>
+              </div>
+              <div class="toggle-option">
+                <label class="cyberpunk-toggle">
+                  <input type="checkbox" id="glitch-effect">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">故障效果</span>
+                </label>
+              </div>
+              <div class="toggle-option">
+                <label class="cyberpunk-toggle">
+                  <input type="checkbox" id="floating-control-visible">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">显示浮动控制面板</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          
+          <div class="option-group">
+            <div class="option-label">扫描设置</div>
+            <div class="toggle-options">
+              <div class="toggle-option">
+                <label class="cyberpunk-toggle">
+                  <input type="checkbox" id="auto-scan">
+                  <span class="toggle-slider"></span>
+                  <span class="toggle-text">自动扫描页面</span>
+                </label>
+              </div>
+            </div>
+            <div class="slider-option">
+              <div class="slider-label">扫描延迟 <span id="scan-delay-value">500</span>ms</div>
+              <input type="range" id="scan-delay" min="100" max="2000" step="100" value="500" class="cyberpunk-range">
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="panel-section">
+        <div class="section-header">
+          <div class="section-title">识别设置</div>
+          <div class="section-decoration"></div>
+        </div>
+        <div class="section-content">
+          <div class="option-group">
+            <div class="option-label">自定义识别关键词</div>
+            <div class="keywords-container">
+              <div class="keywords-list" id="keywords-list">
+                <!-- 关键词标签将通过JS动态添加 -->
+              </div>
+              <div class="keywords-input">
+                <input type="text" id="new-keyword" class="cyberpunk-input" placeholder="添加新关键词...">
+                <button id="add-keyword" class="cyberpunk-button small">
+                  <span class="button-text">添加</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="option-group">
+            <div class="option-label">缓存设置</div>
+            <div class="range-option">
+              <label for="cache-expiration">缓存过期天数: <span id="expiration-days">7</span></label>
+              <input type="range" id="cache-expiration" min="1" max="30" value="7" class="cyberpunk-range">
+            </div>
+            <button id="clear-cache" class="cyberpunk-button danger">
+              <span class="button-text">清除缓存</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="panel-section">
+        <div class="section-header">
+          <div class="section-title">数据管理</div>
+          <div class="section-decoration"></div>
+        </div>
+        <div class="section-content">
+          <div class="option-group">
+            <div class="option-label">导入/导出设置</div>
+            <div class="import-export-buttons">
+              <button id="export-settings" class="cyberpunk-button">
+                <span class="button-text">导出设置</span>
+              </button>
+              <button id="import-settings" class="cyberpunk-button">
+                <span class="button-text">导入设置</span>
+              </button>
+              <input type="file" id="import-file" accept=".json" style="display: none;">
+            </div>
+          </div>
+          
+          <div class="option-group">
+            <div class="option-label">重置设置</div>
+            <button id="reset-settings" class="cyberpunk-button danger">
+              <span class="button-text">恢复默认设置</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <div class="save-container">
+        <div class="save-status" id="save-status"></div>
+        <button id="save-settings" class="cyberpunk-button primary">
+          <span class="button-text">保存设置</span>
+        </button>
+      </div>
+      <div class="version">v1.0.0</div>
+    </div>
+  </div>
+  
+  <script src="options.js"></script>
+</body>
+</html>

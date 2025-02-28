@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon中国卖家识别器</title>
+  <link rel="stylesheet" href="popup.css">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="cyberpunk-container">
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">CN</div>
+        <div class="logo-glow"></div>
+      </div>
+      <div class="title">
+        <h1>Amazon中国卖家识别器</h1>
+        <div class="subtitle">CYBERPUNK EDITION</div>
+      </div>
+    </div>
+    
+    <div class="status-panel">
+      <div class="status-header">
+        <div class="status-title">系统状态</div>
+        <div class="status-decoration"></div>
+      </div>
+      <div class="status-content">
+        <div class="status-item">
+          <div class="status-label">状态</div>
+          <div class="status-value">
+            <div class="toggle-option">
+              <label class="cyberpunk-toggle">
+                <input type="checkbox" id="plugin-enabled">
+                <span class="toggle-slider"></span>
+                <span class="toggle-text">已激活</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">已识别卖家</div>
+          <div class="status-value" id="seller-count">加载中...</div>
+        </div>
+        <div class="status-item">
+          <div class="status-label">当前筛选模式</div>
+          <div class="status-value" id="filter-mode">全部显示</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="control-panel">
+      <div class="panel-header">
+        <div class="panel-title">快速控制</div>
+        <div class="panel-decoration"></div>
+      </div>
+      <div class="panel-content">
+        <div class="control-group">
+          <div class="control-label">筛选模式</div>
+          <div class="control-buttons">
+            <button id="btn-all" class="cyberpunk-button active" data-mode="all">
+              <span class="button-text">全部</span>
+            </button>
+            <button id="btn-chinese" class="cyberpunk-button" data-mode="onlyChinese">
+              <span class="button-text">仅中国</span>
+            </button>
+            <button id="btn-others" class="cyberpunk-button" data-mode="hideChinese">
+              <span class="button-text">隐藏中国</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="control-group">
+          <div class="control-label">标记样式</div>
+          <div class="color-picker">
+            <div class="color-option active" data-color="#ff0055" style="background-color: #ff0055;"></div>
+            <div class="color-option" data-color="#00f3ff" style="background-color: #00f3ff;"></div>
+            <div class="color-option" data-color="#ffcc00" style="background-color: #ffcc00;"></div>
+            <div class="color-option" data-color="#00ff66" style="background-color: #00ff66;"></div>
+            <div class="color-option" data-color="#ff00ff" style="background-color: #ff00ff;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <button id="btn-options" class="cyberpunk-button full-width">
+        <span class="button-text">高级设置</span>
+      </button>
+      <div class="version">v1.0.0</div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

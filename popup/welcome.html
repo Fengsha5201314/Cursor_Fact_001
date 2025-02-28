@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon中国卖家识别器 - 欢迎</title>
+  <link rel="stylesheet" href="popup.css">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    .welcome-container {
+      width: 400px;
+      padding: 20px;
+    }
+    
+    .welcome-title {
+      font-size: 1.5em;
+      margin-bottom: 20px;
+      text-align: center;
+      color: var(--highlight-color);
+      text-shadow: 0 0 5px var(--highlight-color);
+    }
+    
+    .welcome-description {
+      margin-bottom: 30px;
+      line-height: 1.5;
+    }
+    
+    .welcome-buttons {
+      display: flex;
+      justify-content: space-between;
+      gap: 15px;
+    }
+    
+    .welcome-button {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="cyberpunk-container welcome-container">
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">CN</div>
+        <div class="logo-glow"></div>
+      </div>
+      <div class="title">
+        <h1>Amazon中国卖家识别器</h1>
+        <div class="subtitle">CYBERPUNK EDITION</div>
+      </div>
+    </div>
+    
+    <div class="welcome-title">欢迎使用</div>
+    
+    <div class="welcome-description">
+      该插件可以帮助您在Amazon网站上快速识别中国卖家的商品。您可以选择是否立即启用此功能。
+    </div>
+    
+    <div class="welcome-buttons">
+      <button id="enable-plugin" class="cyberpunk-button welcome-button">
+        <span class="button-text">启用插件</span>
+        <span class="button-glow"></span>
+      </button>
+      <button id="disable-plugin" class="cyberpunk-button welcome-button">
+        <span class="button-text">暂不启用</span>
+        <span class="button-glow"></span>
+      </button>
+    </div>
+  </div>
+  
+  <script src="welcome.js"></script>
+</body>
+</html>

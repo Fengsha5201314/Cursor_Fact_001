@@ -291,6 +291,172 @@ class SellerDetector {
   }
   
   /**
+   * 判断卖家是否为中国卖家（同步版本）
+   * @param {string} sellerName - 卖家名称
+   * @param {string} sellerCountry - 卖家国家（可选）
+   * @return {boolean} 是否为中国卖家
+   */
+  isChineseSeller(sellerName, sellerCountry = null) {
+    if (!sellerName) return false;
+    
+    // 生成缓存键
+    const cacheKey = `${sellerName}-${sellerCountry || ''}`;
+    
+    // 检查缓存
+    if (this.sellerCache[cacheKey] !== undefined) {
+      console.log(`使用缓存结果: ${sellerName} -> ${this.sellerCache[cacheKey] ? '中国卖家' : '非中国卖家'}`);
+      return this.sellerCache[cacheKey];
+    }
+    
+    console.log(`判断卖家是否为中国卖家: ${sellerName}`);
+    
+    let confidence = 0;
+    const details = {};
+    
+    // 如果有国家信息，直接匹配
+    if (sellerCountry) {
+      const countryLower = sellerCountry.toLowerCase();
+      if (countryLower.includes('china') || 
+          countryLower.includes('中国') || 
+          countryLower === 'cn' || 
+          countryLower === 'prc') {
+        console.log(`卖家国家直接匹配中国: ${sellerCountry}`);
+        this.sellerCache[cacheKey] = true;
+        return true;
+      }
+    }
+    
+    // 直接匹配中国/China关键字，这是最明确的情况
+    if (sellerName.toLowerCase().includes('china') || 
+        sellerName.toLowerCase().includes('chinese') || 
+        sellerName.toLowerCase().includes('中国') ||
+        /\b(cn|prc)\b/i.test(sellerName) || 
+        sellerName.includes('深圳') || 
+        sellerName.includes('广州') || 
+        sellerName.includes('上海') || 
+        sellerName.includes('北京') ||
+        sellerName.includes('杭州') ||
+        sellerName.includes('义乌')) {
+      console.log(`卖家名称直接包含中国地区关键词: ${sellerName}`);
+      this.sellerCache[cacheKey] = true;
+      return true;
+    }
+    
+    // 检查拼音名称特征
+    const pinyinPattern = /^[a-z]+(hua|xin|feng|tian|yang|zhang|wang|chen|liu|huang|zhou|wu|li|zhao|sun|yu|wei|ma|zhu|guo|lin|luo|cheng|he|gao|zeng|xie|xu)$/i;
+    if (pinyinPattern.test(sellerName.replace(/\s+/g, '').toLowerCase())) {
+      console.log(`卖家名称匹配拼音模式: ${sellerName}`);
+      confidence += 0.6;
+      details.pinyinMatch = true;
+    }
+    
+    // 检查常见中文电商卖家命名模式
+    const chineseSellerPattern = /^[A-Z0-9]{5,}$/; // 全大写字母+数字组合
+    const randomLetterPattern = /^[A-Z]{2,4}[A-Z0-9]{3,}$/; // 2-4个大写字母后跟随数字
+    const randomMixPattern = /^[a-zA-Z]{2,3}[0-9]{1,3}[a-zA-Z]{1,3}$/; // 字母数字混合模式
+    
+    if (chineseSellerPattern.test(sellerName) || 
+        randomLetterPattern.test(sellerName) || 
+        randomMixPattern.test(sellerName)) {
+      console.log(`卖家名称匹配中国卖家命名模式: ${sellerName}`);
+      confidence += 0.5;
+      details.namingPattern = true;
+    }
+    
+    // 检查常见中国卖家关键词
+    const chineseKeywords = [
+      'trading', 'ecommerce', 'tech', 'digital', 'electronic', 'home', 'life', 'living',
+      'shop', 'store', 'mall', 'market', 'best', 'top', 'super', 'mega', 'direct',
+      'factory', 'official', 'flagship', 'authorized', 'global', 'international',
+      'yiwu', 'shenzhen', 'guangzhou', 'shanghai', 'hangzhou', 'dongguan',
+      'xin', 'feng', 'tian', 'yang', 'zhang', 'wang', 'chen', 'liu', 'huang', 'zhou',
+      'wu', 'li', 'zhao', 'sun', 'yu', 'wei', 'ma', 'zhu', 'guo', 'lin', 'luo', 'cheng',
+      'he', 'gao', 'zeng', 'xie', 'xu', 'co', 'ltd', 'inc', 'group', 'technology'
+    ];
+    
+    // 添加自定义关键词
+    if (this.customKeywords && this.customKeywords.length > 0) {
+      chineseKeywords.push(...this.customKeywords);
+    }
+    
+    // 分词检查
+    const words = sellerName.toLowerCase().split(/[\s\-_.,&+]/);
+    let keywordHits = 0;
+    
+    for (const word of words) {
+      if (word.length < 2) continue; // 忽略太短的词
+      
+      if (chineseKeywords.includes(word)) {
+        keywordHits++;
+        confidence += 0.15;
+        details[`keyword_${word}`] = true;
+      }
+    }
+    
+    // 检查特殊模式
+    // 1. 拼音+英文单词组合
+    if (/^[a-z]{2,5}(shop|store|home|life|tech|best|top|mall|market|global|direct)$/i.test(sellerName.replace(/\s+/g, '').toLowerCase())) {
+      confidence += 0.4;
+      details.pinyinEnglishPattern = true;
+    }
+    
+    // 2. 随机字母+数字+常见后缀
+    if (/^[A-Z0-9]{3,6}(shop|store|mall|tech|home)$/i.test(sellerName.replace(/\s+/g, '').toLowerCase())) {
+      confidence += 0.4;
+      details.randomSuffixPattern = true;
+    }
+    
+    // 3. 检查是否有多个大写字母连续出现
+    if (/[A-Z]{3,}/.test(sellerName)) {
+      confidence += 0.2;
+      details.upperCasePattern = true;
+    }
+    
+    // 4. 检查是否有数字+字母的组合模式
+    if (/[0-9]{2,}[a-zA-Z]+/.test(sellerName) || /[a-zA-Z]+[0-9]{2,}/.test(sellerName)) {
+      confidence += 0.3;
+      details.numberLetterPattern = true;
+    }
+    
+    // 5. 检查是否有连续的数字
+    if (/[0-9]{3,}/.test(sellerName)) {
+      confidence += 0.2;
+      details.consecutiveNumbers = true;
+    }
+    
+    // 6. 检查是否有特殊的中国电商平台命名模式
+    if (/^[A-Za-z]{1,3}[0-9]{1,3}[A-Za-z]{1,3}$/.test(sellerName)) {
+      confidence += 0.5;
+      details.platformPattern = true;
+    }
+    
+    // 7. 检查是否有中文拼音的特征
+    const pinyinSyllables = ['zhao', 'qian', 'sun', 'li', 'zhou', 'wu', 'zheng', 'wang', 'feng', 'chen', 
+                            'zhu', 'wei', 'jiang', 'shen', 'han', 'yang', 'zhu', 'qin', 'you', 'xu', 
+                            'he', 'lv', 'shi', 'zhang', 'kong', 'cao', 'yan', 'hua', 'jin', 'liao', 
+                            'hao', 'cheng', 'xie', 'guo', 'gao'];
+    
+    for (const syllable of pinyinSyllables) {
+      if (sellerName.toLowerCase().includes(syllable)) {
+        confidence += 0.1;
+        details[`pinyin_${syllable}`] = true;
+        break; // 只计算一次拼音特征
+      }
+    }
+    
+    // 根据置信度判断
+    const isChinese = confidence >= this.confidenceThreshold;
+    
+    // 缓存结果
+    this.sellerCache[cacheKey] = isChinese;
+    
+    console.log(`卖家 ${sellerName} 判断结果: ${isChinese ? '中国卖家' : '非中国卖家'} (置信度: ${confidence.toFixed(2)})`);
+    console.log('判断详情:', details);
+    
+    return isChinese;
+  }
+  
+  /**
    * 检查卖家是否为中国卖家
    * @param {string} sellerId - 卖家ID
    * @param {string} sellerName - 卖家名称

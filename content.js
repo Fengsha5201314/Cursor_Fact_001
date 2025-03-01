@@ -5,40 +5,205 @@
 
 'use strict';
 
-// 全局变量和状态
-let SellerDetector;
+// 全局变量和设置
 let settings = {
   pluginEnabled: true,
   markerColor: 'rgba(255, 0, 85, 0.85)',
   confidenceThreshold: 0.65,
   filterMode: 'all',
-  customKeywords: []
+  customKeywords: [],
+  autoScan: true,
+  highlightColor: '#ff0055'
 };
-let sellerCache = {};
 let currentPageType = 'unknown';
 let isScanning = false;
-let scanTimeout;
+let scanTimeout = null;
+let sellerInfo = {};
+
+// 创建直接可用的sellerDetector对象，不依赖外部加载
+const sellerDetector = {
+  isChineseSeller: function(sellerName) {
+    if (!sellerName) return false;
+    
+    console.log(`[sellerDetector] 判断卖家是否来自中国: "${sellerName}"`);
+    
+    // 清理和标准化卖家名称
+    const cleanName = sellerName.toLowerCase().trim()
+      .replace(/\s+/g, '')
+      .replace(/[^\w\s\u4e00-\u9fff]/g, ''); // 移除特殊字符但保留中文
+    
+    // 1. 直接包含中文字符
+    if (/[\u4e00-\u9fff]/.test(cleanName)) {
+      console.log(`[sellerDetector] 卖家名称包含中文字符: ${sellerName}`);
+      return true;
+    }
+    
+    // 2. 包含中国城市或地区名称
+    const chineseCities = [
+      'beijing', 'shanghai', 'shenzhen', 'guangzhou', 'hangzhou', 
+      'chengdu', 'nanjing', 'wuhan', 'tianjin', 'suzhou', 
+      'xiamen', 'dongguan', 'foshan', 'ningbo', 'zhongshan', 
+      'chongqing', 'qingdao', 'dalian', 'kunming', 'jinan',
+      'yiwu', 'wenzhou', 'hefei', 'shenyang', 'changsha',
+      'xian', 'zhengzhou'
+    ];
+    
+    for (const city of chineseCities) {
+      if (cleanName.includes(city)) {
+        console.log(`[sellerDetector] 卖家名称包含中国城市: ${city}`);
+        return true;
+      }
+    }
+    
+    // 3. 常见中国卖家名称模式
+    const chinesePatterns = [
+      /^cn[_-]?/i,                  // 以cn开头
+      /[_-]?cn$/i,                  // 以cn结尾
+      /^ch[_-]?/i,                  // 以ch开头
+      /[_-]?ch$/i,                  // 以ch结尾
+      /china[_-]?/i,                // 包含china
+      /^(?:sz|gz|sh|bj|hz)[a-z0-9]/i, // 城市缩写开头
+      /^[a-z]+(?:2019|2020|2021|2022|2023|2024|888|666|168|818)$/i, // 数字组合
+      /^(?:[a-z]{2,4})[_-]?(?:[a-z]{2,4})[_-]?(?:shop|store|mall|sz|cn|china)$/i, // 常见组合
+      /^[a-z]+(?:trading|ecommerce|import|export|wholesale|retail)(?:co|ltd)?$/i, // 贸易公司
+      /^[a-z]{4,8}(?:best|first|top|good|great|new|hot|cool|super|baby|home)$/i, // 常见后缀
+      /^(?:best|first|top|good|great|new|hot|cool|super|win|lucky)[a-z]{4,8}$/i,  // 常见前缀
+      /^[a-z]{2,5}(?:mall|shop|store|sell|buy|home|house|life|world|city|star|day)$/i, // 常见后缀
+      /^(?:mall|shop|store|sell|buy|home|house|life|world|city|win|day)[a-z]{2,5}$/i,  // 常见前缀
+      /^[a-z]{3,5}(?:[_-]?)[0-9]{2,4}$/i, // 字母+数字组合
+      /(?:yi|yong|xin|xing|hong|jia|feng|tai)(?:da|xiang|yu|fu|feng|pin)/i // 拼音组合
+    ];
+    
+    for (const pattern of chinesePatterns) {
+      if (pattern.test(cleanName)) {
+        console.log(`[sellerDetector] 卖家名称匹配中国卖家模式: ${pattern}`);
+        return true;
+      }
+    }
+    
+    console.log(`[sellerDetector] 卖家 "${sellerName}" 不符合任何中国卖家模式`);
+    return false;
+  }
+};
+
+// 创建全局的 SellerDetector 类，确保其可用性
+if (typeof window.SellerDetector === 'undefined') {
+  window.SellerDetector = class SellerDetector {
+    constructor(settings) {
+      this.settings = settings || {};
+      console.log('[SellerDetector] 初始化完成');
+    }
+    
+    isChineseSeller(sellerName) {
+      // 直接使用我们定义的检测函数
+      return sellerDetector.isChineseSeller(sellerName);
+    }
+    
+    updateSettings(newSettings) {
+      this.settings = { ...this.settings, ...newSettings };
+      console.log('[SellerDetector] 设置已更新:', this.settings);
+    }
+  };
+  
+  console.log('[Global] 已创建 SellerDetector 全局类');
+}
+
+// 全局变量和状态
+let sellerCache = {};
 let observerActive = false;
 let floatingControlVisible = false; // 控制浮动控制面板的可见性
 
 // 导入SellerDetector类和全局样式
 // 注意：由于content_scripts的限制，我们需要动态加载SellerDetector和全局样式
 function loadSellerDetector() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // 检查是否已加载
     if (window.SellerDetector) {
+      console.log('SellerDetector已加载，无需重新加载');
       resolve();
       return;
     }
     
-    // 创建脚本元素
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('utils/seller-detector.js');
-    script.onload = () => {
-      script.remove();
-      resolve();
-    };
-    (document.head || document.documentElement).appendChild(script);
+    // 添加重试逻辑
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    function attemptLoad() {
+      console.log(`尝试加载SellerDetector (尝试次数: ${retryCount + 1}/${maxRetries})`);
+      
+      // 创建脚本元素
+      const script = document.createElement('script');
+      
+      try {
+        // 获取脚本URL
+        const scriptUrl = chrome.runtime.getURL('utils/seller-detector.js');
+        console.log('加载脚本:', scriptUrl);
+        script.src = scriptUrl;
+        
+        // 成功事件
+        script.onload = () => {
+          console.log('SellerDetector脚本加载成功');
+          script.remove();
+          
+          // 验证SellerDetector是否真的可用
+          if (typeof window.SellerDetector === 'undefined') {
+            console.error('SellerDetector加载完成但未定义，可能是脚本内容有问题');
+            handleError(new Error('SellerDetector未定义'));
+            return;
+          }
+          
+          console.log('SellerDetector加载并验证成功');
+          resolve();
+        };
+        
+        // 错误事件
+        script.onerror = (error) => {
+          console.error('加载SellerDetector脚本时出错:', error);
+          script.remove();
+          handleError(error);
+        };
+        
+        // 添加脚本到页面
+        (document.head || document.documentElement).appendChild(script);
+        
+      } catch (error) {
+        console.error('创建或添加SellerDetector脚本时出错:', error);
+        handleError(error);
+      }
+    }
+    
+    // 错误处理函数
+    function handleError(error) {
+      retryCount++;
+      if (retryCount < maxRetries) {
+        console.log(`将在1秒后重试加载SellerDetector (${retryCount}/${maxRetries})`);
+        setTimeout(attemptLoad, 1000);
+      } else {
+        console.error(`SellerDetector加载失败，已达到最大重试次数 (${maxRetries})`);
+        
+        // 创建备用检测函数，避免整个扩展崩溃
+        window.SellerDetector = {
+          detect: function(text) {
+            console.log('使用备用检测方法，可能不够准确');
+            // 简单的检测逻辑，检查是否包含中国城市或地址关键词
+            const keywords = ['china', 'beijing', 'shanghai', 'shenzhen', 'guangzhou', 'hangzhou'];
+            const lowerText = (text || '').toLowerCase();
+            for (const keyword of keywords) {
+              if (lowerText.includes(keyword)) {
+                return { isChineseSeller: true, confidence: 0.6 };
+              }
+            }
+            return { isChineseSeller: false, confidence: 0 };
+          }
+        };
+        
+        console.log('已创建备用SellerDetector');
+        resolve(); // 使用备用方案继续
+      }
+    }
+    
+    // 开始加载
+    attemptLoad();
   });
 }
 
@@ -129,78 +294,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       isScanning = false; // 确保removeAllMarks不会意外地设置isScanning为true
       console.log('[重要] 移除标记后再次确认 isScanning:', isScanning);
       
-      // 5. 创建或更新扫描状态容器，强调重新扫描
+      // 5. 更新显示状态
       const statusContainer = ensureScanStatusContainer();
       if (statusContainer) {
-        updateScanStatus(false, 0, 0, '正在准备刷新扫描...', true);
+        // 显示扫描状态容器
+        statusContainer.style.display = 'block';
+        setTimeout(() => {
+          statusContainer.style.opacity = '1';
+          statusContainer.style.transform = 'translateY(0)';
+        }, 10);
       }
       
-      // 6. 确保页面类型已正确识别
-      currentPageType = determinePageType();
-      console.log('[刷新扫描] 当前页面类型:', currentPageType);
-      
-      // 7. 强制检查当前页面是否为搜索页面，如果不是，尝试使用更宽松的判断
-      if (currentPageType !== 'search') {
-        console.log('[警告] 当前页面不是标准搜索页面，尝试更宽松的判断...');
-        
-        // 检查URL和页面结构是否可能是搜索页
-        const url = window.location.href;
-        const hasSearchResults = document.getElementById('search') || 
-                                document.querySelector('.s-main-slot') || 
-                                document.querySelector('.s-search-results');
-        
-        if ((url.includes('amazon') && (url.includes('ref=') || url.includes('field-keywords='))) || hasSearchResults) {
-          console.log('[刷新扫描] 使用宽松判断将页面视为搜索页面');
-          currentPageType = 'search';
-        } else {
-          console.log('[错误] 当前页面类型不支持扫描:', currentPageType);
-          updateScanStatus(false, 0, 0, '当前页面不支持扫描，请在搜索结果页使用此功能', false);
-          isScanning = false;
-          return;
-        }
-      }
-      
-      // 8. 延长延迟时间，确保DOM有足够时间更新，并强调正在进行刷新扫描
-      console.log('设置延迟2秒后重新初始化...');
-      window.setTimeout(() => {
-        console.log('[重要] 延迟时间到，再次确认 isScanning:', isScanning);
-        // 再次检查确保扫描状态已重置
+      // 6. 设置一个小延迟以确保DOM已更新并且isScanning重置
+      setTimeout(() => {
+        console.log('延迟后开始处理搜索页面...');
+        // 确保isScanning为false
         isScanning = false;
-        
-        // 最后一次确认isScanning状态，然后开始新的扫描
-        console.log('[刷新扫描] 最终状态检查，isScanning:', isScanning);
-        console.log('[刷新扫描] 开始执行搜索页面处理，启动新的扫描流程');
-        
-        // 直接调用processSearchPage，而不是init()，避免其他初始化过程干扰
+        // 开始新的扫描
         processSearchPage();
-      }, 2000); // 2秒延迟，确保DOM有足够时间更新
+      }, 300);
     } catch (error) {
       console.error('处理刷新扫描请求时出错:', error);
-      // 确保即使出错也重置扫描状态
-      isScanning = false;
-      
-      // 尝试再次进行扫描
-      setTimeout(() => {
-        console.log('[错误恢复] 尝试再次启动扫描');
-        isScanning = false;
-        currentPageType = determinePageType(); // 再次检查页面类型
-        if (currentPageType === 'search') {
-          processSearchPage();
-        } else {
-          console.log('[错误] 当前页面类型不支持扫描:', currentPageType);
-          updateScanStatus(false, 0, 0, '当前页面不支持扫描，请在搜索结果页使用此功能', false);
-        }
-      }, 3000);
-      
-      // 只有在尚未响应的情况下才发送错误响应
-      try {
-        sendResponse({ success: false, error: error.message });
-      } catch (e) {
-        console.log('无法发送响应，可能已关闭', e);
-      }
+      sendResponse({ success: false, error: error.message });
     }
     
-    // 注意：已经使用sendResponse，所以这里不需要返回true
+    // 已通过sendResponse立即回复
+    return true;
   }
   return true;
 });
@@ -209,112 +328,81 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * 移除所有标记和控制面板
  */
 function removeAllMarks() {
+  console.log('开始移除所有卖家标记...');
+  
+  // 保存当前滚动位置
+  const scrollPos = window.pageYOffset;
+  
   try {
-    console.log('开始移除所有标记和控制面板...');
-    
-    // 移除控制面板
-    const controlPanel = document.getElementById('cn-seller-filter-controls');
+    // 1. 移除控制面板
+    const controlPanel = document.getElementById('cn-seller-control-panel');
     if (controlPanel) {
-      console.log('移除控制面板');
       controlPanel.remove();
+      console.log('已移除控制面板');
     }
     
-    // 移除占位符
-    const placeholder = document.getElementById('cn-seller-filter-placeholder');
+    // 2. 移除占位符
+    const placeholder = document.getElementById('cn-seller-placeholder');
     if (placeholder) {
-      console.log('移除占位符');
       placeholder.remove();
+      console.log('已移除占位符');
     }
     
-    // 移除扫描状态容器
-    const scanStatusContainer = document.getElementById('scan-status-container');
-    if (scanStatusContainer) {
-      console.log('移除扫描状态容器');
-      scanStatusContainer.remove();
+    // 3. 移除扫描状态容器
+    const statusContainer = document.getElementById('cn-seller-scan-status');
+    if (statusContainer) {
+      statusContainer.remove();
+      console.log('已移除扫描状态容器');
     }
     
-    // 移除所有已处理的卡片标记
-    console.log('开始移除所有已处理的卡片标记');
-    const processedCards = document.querySelectorAll('[data-seller-processed]');
-    console.log(`找到 ${processedCards.length} 个已处理的卡片`);
+    // 4. 查找所有已处理的卡片
+    const processedCards = document.querySelectorAll('[data-seller-processed="true"]');
+    console.log(`找到 ${processedCards.length} 个已处理卡片`);
     
+    // 5. 安全移除相关属性和类，保留数据
     processedCards.forEach(card => {
-      try {
-        // 移除处理标记
-        card.removeAttribute('data-seller-processed');
-        card.removeAttribute('data-seller-type');
-        card.removeAttribute('data-marked-chinese');
-        
-        // 获取卡片的父容器
-        let container = null;
-        try {
-          container = findProductCardParent(card);
-          if (!container) {
-            container = card;
-          }
-        } catch (error) {
-          console.error('查找卡片父容器时出错:', error);
-          container = card;
-        }
-        
-        // 移除中国卖家标记类和样式
-        container.classList.remove('cn-seller-card');
-        container.style.border = '';
-        container.style.boxShadow = '';
-        
-        // 移除中国卖家标记元素
-        const markers = container.querySelectorAll('.chinese-seller-marker');
-        markers.forEach(marker => marker.remove());
-        
-        // 恢复标题样式
-        const titleSelectors = [
-          'h2 a', 
-          '.a-size-medium', 
-          '.a-size-base-plus', 
-          '[data-cy="title-recipe"]',
-          'h5 a',
-          '.a-link-normal .a-text-normal',
-          '.a-color-base.a-text-normal'
-        ];
-        
-        for (const selector of titleSelectors) {
-          const titleElement = container.querySelector(selector);
-          if (titleElement) {
-            titleElement.classList.remove('cn-seller-title');
-            titleElement.style.color = '';
-            titleElement.style.textShadow = '';
-            titleElement.style.fontWeight = '';
-          }
-        }
-      } catch (cardError) {
-        console.error('清除卡片标记时出错:', cardError);
+      // 获取父元素，恢复显示
+      const parentElement = findProductCardParent(card);
+      if (parentElement && parentElement.style.display === 'none') {
+        parentElement.style.display = '';
+        console.log('已恢复隐藏的卡片显示');
       }
-    });
-    
-    // 移除所有标记元素（以防有遗漏）
-    const allMarkers = document.querySelectorAll('.chinese-seller-marker');
-    allMarkers.forEach(marker => marker.remove());
-    
-    // 移除所有标记的卡片样式
-    const markedCards = document.querySelectorAll('.cn-seller-card');
-    markedCards.forEach(card => {
+      
+      // 移除中国卖家标记类和数据属性
       card.classList.remove('cn-seller-card');
-      card.style.border = '';
-      card.style.boxShadow = '';
+      
+      // 移除卖家类型数据属性
+      card.removeAttribute('data-seller-type');
+      
+      // 移除处理标志但保留数据，以便保持插件状态
+      card.setAttribute('data-seller-processed', 'false');
+      
+      // 移除卖家标记图标
+      const sellerMarker = card.querySelector('.cn-seller-marker');
+      if (sellerMarker) {
+        sellerMarker.remove();
+      }
+      
+      // 移除卖家标记样式
+      card.style.removeProperty('--highlight-color');
+      card.style.removeProperty('border');
+      card.style.removeProperty('border-color');
+      card.style.removeProperty('background');
     });
     
-    // 移除所有标记的标题样式
-    const markedTitles = document.querySelectorAll('.cn-seller-title');
-    markedTitles.forEach(title => {
-      title.classList.remove('cn-seller-title');
-      title.style.color = '';
-      title.style.textShadow = '';
-      title.style.fontWeight = '';
-    });
+    // 6. 重置全局状态
+    sellerInfo = {}; // 重置卖家信息缓存
+    isScanning = false; // 确保扫描状态被重置
     
-    console.log('所有标记和控制面板已移除');
+    console.log('所有卖家标记已成功移除');
+    
+    // 恢复滚动位置
+    window.scrollTo(0, scrollPos);
+    
+    return true;
   } catch (error) {
-    console.error('移除标记时出错:', error);
+    console.error('移除卖家标记时出错:', error);
+    return false;
   }
 }
 
@@ -322,70 +410,89 @@ function removeAllMarks() {
  * 更新已识别卖家计数
  */
 function updateSellerCount() {
-  chrome.storage.local.get('sellerCache', data => {
-    const cache = data.sellerCache || {};
-    const sellerCount = Object.keys(cache).length;
-    const chineseSellerCount = Object.values(cache).filter(item => item.isChineseSeller).length;
+  try {
+    console.log('[统计] 更新卖家计数统计...');
     
-    console.log('更新卖家计数:', chineseSellerCount, '/', sellerCount);
+    // 获取所有处理过的卡片
+    const processedCards = document.querySelectorAll('[data-seller-processed="true"]');
+    const totalProcessed = processedCards.length;
     
-    // 更新popup中的计数
-    chrome.runtime.sendMessage({
-      action: 'updateSellerCount',
-      data: {
-        total: sellerCount,
-        chinese: chineseSellerCount
-      }
-    });
+    // 获取中国卖家卡片
+    const chineseSellerCards = document.querySelectorAll('[data-seller-type="chinese"]');
+    const chineseSellerCount = chineseSellerCards.length;
     
-    // 如果存在状态面板，也更新面板中的计数
-    const statusContainer = document.getElementById('scan-status-container');
-    if (statusContainer) {
-      // 移除旧的计数信息
-      const oldCountElement = statusContainer.querySelector('.seller-count-info');
-      if (oldCountElement) {
-        oldCountElement.remove();
-      }
-      
-      // 创建新的计数元素
-      const countElement = document.createElement('div');
-      countElement.className = 'seller-count-info';
-      countElement.textContent = `已识别中国卖家: ${chineseSellerCount}/${sellerCount}`;
-      countElement.style.marginTop = '8px';
-      countElement.style.marginBottom = '5px';
-      countElement.style.color = 'var(--highlight-color)';
-      countElement.style.fontWeight = 'bold';
-      countElement.style.textShadow = '0 0 3px var(--highlight-color)';
-      countElement.style.padding = '3px 6px';
-      countElement.style.borderLeft = '2px solid var(--highlight-color)';
-      countElement.style.backgroundColor = 'rgba(255, 0, 85, 0.1)';
-      countElement.style.fontSize = '14px';
-      countElement.style.letterSpacing = '0.5px';
-      countElement.style.animation = 'count-update 0.5s ease';
-      
-      // 添加动画样式
-      const countStyle = document.createElement('style');
-      countStyle.textContent = `
-        @keyframes count-update {
-          0% { opacity: 0; transform: translateY(-5px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-      `;
-      document.head.appendChild(countStyle);
-      
-      // 添加到状态容器
-      statusContainer.appendChild(countElement);
-      
-      // 更新背景插件的存储
-      chrome.storage.sync.set({
-        sellerStats: {
-          total: sellerCount,
-          chinese: chineseSellerCount,
-          lastUpdate: new Date().toISOString()
-        }
-      });
+    console.log(`[统计] 已处理卡片: ${totalProcessed}, 中国卖家: ${chineseSellerCount}`);
+    
+    // 计算中国卖家百分比
+    console.log(`[统计] 已处理卡片总数: ${totalProcessed}, 中国卖家数量: ${chineseSellerCount}`);
+    
+    // 如果没有已处理的卡片，不更新统计
+    if (totalProcessed === 0) {
+      console.log('[统计] 没有已处理的卡片，不更新统计');
+      return;
     }
-  });
+    
+    // 计算中国卖家比例
+    const percentage = Math.round((chineseSellerCount / totalProcessed) * 100);
+    
+    try {
+      // 更新插件存储中的统计数据
+      chrome.storage.local.set({
+        sellerStats: {
+          totalProducts: totalProcessed,
+          chineseSellerCount: chineseSellerCount,
+          percentage: percentage,
+          timestamp: Date.now()
+        }
+      }, () => {
+        console.log(`[统计] 已保存到本地存储: 总数=${totalProcessed}, 中国卖家=${chineseSellerCount}, 比例=${percentage}%`);
+      });
+    } catch (storageError) {
+      console.error('[统计] 保存到存储时出错:', storageError);
+    }
+    
+    // 更新统计UI显示
+    try {
+      const statsContainer = document.getElementById('cn-seller-scan-status');
+      if (statsContainer) {
+        // 更新进度文本
+        const progressText = statsContainer.querySelector('.scan-progress-text');
+        if (progressText) {
+          progressText.textContent = `已扫描: ${totalProcessed}/${totalProcessed}`;
+        }
+        
+        // 更新统计数据
+        const stats = {
+          total: totalProcessed,
+          chinese: chineseSellerCount,
+          nonChinese: totalProcessed - chineseSellerCount,
+          percentage: percentage
+        };
+        
+        updateScanStats(stats);
+        console.log(`[统计] UI统计数据已更新`);
+      }
+    } catch (uiError) {
+      console.error('[统计] 更新UI统计数据时出错:', uiError);
+    }
+    
+    // 确保筛选按钮状态正确
+    try {
+      updateFilterButtonsState(settings.filterMode || 'all');
+      console.log('[统计] 筛选按钮状态已更新');
+    } catch (filterError) {
+      console.error('[统计] 更新筛选按钮状态时出错:', filterError);
+    }
+    
+    return {
+      totalProducts: totalProcessed,
+      chineseSellerCount: chineseSellerCount,
+      percentage: percentage
+    };
+  } catch (error) {
+    console.error('[统计] 更新卖家统计时出错:', error);
+    return null;
+  }
 }
 
 // 初始化
@@ -395,66 +502,63 @@ init();
  * 初始化函数
  */
 async function init() {
-  // 检查插件是否启用
-  const enabled = await isPluginEnabled();
-  if (!enabled) {
-    console.log('Amazon中国卖家识别器已禁用');
-    return;
-  }
+  console.log('初始化Amazon中国卖家检测插件');
+  console.log('当前URL:', window.location.href);
   
-  // 加载SellerDetector类
-  await loadSellerDetector();
-  
-  // 获取设置
-  settings = await getSettings();
-  console.log('已加载设置:', settings);
-  
-  // 加载全局样式
-  await loadGlobalStyles();
-  
-  // 确定页面类型
-  currentPageType = determinePageType();
-  
-  // 应用全局样式 - 传入settings参数
-  if (window.addGlobalStyles) {
-    console.log('应用全局样式，使用设置:', settings);
-    window.addGlobalStyles(settings);
-  } else {
-    console.error('全局样式函数未加载');
-  }
-  
-  // 添加浮动控制按钮 - 无论页面类型都添加
-  addFloatingButton();
-  
-  // 根据页面类型执行相应操作
-  if (currentPageType === 'search') {
-    // 搜索结果页
-    // 添加筛选控制面板
-    addFilterControls();
+  try {
+    // 检查插件是否启用
+    const enabled = await isPluginEnabled();
+    if (!enabled) {
+      console.log('插件已禁用，跳过初始化');
+      return;
+    }
     
-    // 添加滚动事件监听
-    addScrollListener();
+    // 加载必要的类
+    await loadSellerDetector();
+    console.log('已加载SellerDetector类');
     
-    // 监听页面变化（针对无限滚动和AJAX加载）
-    observePageChanges();
+    // 获取设置
+    settings = await getSettings();
+    console.log('已加载设置:', settings);
     
-    // 自动扫描功能 - 始终启用
-    console.log('准备开始自动扫描页面...');
+    // 应用全局样式
+    loadGlobalStyles();
     
-    // 创建或更新扫描状态容器，提前显示即将扫描的状态
-    ensureScanStatusContainer();
-    updateScanStatus(false, 0, 0, '页面加载完成后将自动开始扫描...');
+    // 确定当前页面类型
+    currentPageType = determinePageType();
+    console.log('当前页面类型:', currentPageType);
     
-    // 延迟一小段时间再开始扫描，确保页面已完全加载
-    clearTimeout(scanTimeout);
-    scanTimeout = setTimeout(() => {
-      console.log('开始自动扫描页面');
-      processSearchPage();
-    }, 1500); // 增加延迟时间，确保页面完全加载
-  } 
-  else if (currentPageType === 'product') {
-    // 商品详情页
-    processProductPage();
+    // 尝试恢复上次扫描结果
+    if (currentPageType === 'search') {
+      const restored = restoreSearchResults();
+      if (restored) {
+        console.log('已成功恢复上次扫描结果');
+        return; // 如果已恢复，跳过后续初始化
+      } else {
+        console.log('没有可恢复的扫描结果或恢复失败');
+      }
+    }
+    
+    // 根据页面类型执行相应的操作
+    if (currentPageType === 'search' && settings.autoScan) {
+      // 自动扫描搜索结果页面
+      console.log('启用了自动扫描，等待页面加载完成后开始扫描...');
+      
+      // 更新扫描状态
+      updateScanStatus(true, 0, 0, '准备自动扫描...');
+      
+      // 延迟一段时间后开始扫描，确保页面已完全加载
+      scanTimeout = setTimeout(async () => {
+        console.log('开始自动扫描...');
+        await processSearchPage();
+      }, 2000);
+    } else if (currentPageType === 'search') {
+      // 搜索页面但不自动扫描，只添加控制面板
+      console.log('在搜索页面添加控制面板');
+      addFilterControls();
+    }
+  } catch (error) {
+    console.error('初始化失败:', error);
   }
 }
 
@@ -477,10 +581,94 @@ function isPluginEnabled() {
  */
 function getSettings() {
   return new Promise(resolve => {
-    chrome.runtime.sendMessage({ action: 'getSettings' }, response => {
-      resolve(response.settings);
-    });
+    try {
+      // 确保chrome.runtime存在
+      if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+        console.error('chrome.runtime.sendMessage 不可用');
+        // 返回默认设置
+        resolve({
+          autoScan: true,
+          highlightColor: '#ff0055',
+          filterMode: 'all'
+        });
+        return;
+      }
+      
+      // 添加超时处理
+      const timeoutId = setTimeout(() => {
+        console.error('获取设置超时');
+        resolve({
+          autoScan: true,
+          highlightColor: '#ff0055',
+          filterMode: 'all'
+        });
+      }, 3000);
+      
+      // 发送消息
+      chrome.runtime.sendMessage({ action: 'getSettings' }, response => {
+        clearTimeout(timeoutId);
+        
+        if (chrome.runtime.lastError) {
+          console.error('获取设置时出错:', chrome.runtime.lastError);
+          resolve({
+            autoScan: true,
+            highlightColor: '#ff0055',
+            filterMode: 'all'
+          });
+          return;
+        }
+        
+        if (!response || !response.settings) {
+          console.error('获取设置时返回无效响应:', response);
+          resolve({
+            autoScan: true,
+            highlightColor: '#ff0055',
+            filterMode: 'all'
+          });
+          return;
+        }
+        
+        resolve(response.settings);
+      });
+    } catch (error) {
+      console.error('获取设置过程中出错:', error);
+      resolve({
+        autoScan: true,
+        highlightColor: '#ff0055',
+        filterMode: 'all'
+      });
+    }
   });
+}
+
+/**
+ * 安全地发送消息到背景脚本
+ * @param {Object} message - 要发送的消息
+ * @param {Function} [callback] - 可选的回调函数
+ */
+function safeSendMessage(message, callback) {
+  try {
+    // 确保chrome.runtime存在
+    if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+      console.error('chrome.runtime.sendMessage 不可用');
+      if (callback) callback(null);
+      return;
+    }
+    
+    // 发送消息
+    chrome.runtime.sendMessage(message, response => {
+      if (chrome.runtime.lastError) {
+        console.error('发送消息时出错:', chrome.runtime.lastError);
+        if (callback) callback(null);
+        return;
+      }
+      
+      if (callback) callback(response);
+    });
+  } catch (error) {
+    console.error('发送消息过程中出错:', error);
+    if (callback) callback(null);
+  }
 }
 
 /**
@@ -501,199 +689,673 @@ function determinePageType() {
 }
 
 /**
+ * 保存搜索结果到localStorage
+ * @param {number} totalProducts - 总产品数量
+ * @param {number} chineseSellerCount - 中国卖家数量
+ * @param {Array} results - 处理结果
+ */
+function saveSearchResults(totalProducts, chineseSellerCount, results) {
+  try {
+    // 提取当前URL的路径部分作为KEY
+    const urlPath = window.location.pathname + window.location.search;
+    
+    // 提取所有已标记的卡片的ASIN和父元素选择器路径
+    const markedCards = document.querySelectorAll('[data-marked-as-chinese="true"]');
+    const markedAsins = Array.from(markedCards).map(card => {
+      const asin = card.getAttribute('data-asin') || '';
+      const parent = findProductCardParent(card);
+      
+      // 创建一个简单的选择器路径，用于稍后恢复
+      let selectorPath = '';
+      if (parent) {
+        const classes = Array.from(parent.classList).join('.');
+        selectorPath = classes ? `.${classes}` : '';
+      }
+      
+      return { asin, selectorPath };
+    });
+    
+    // 构建保存数据
+    const saveData = {
+      timestamp: Date.now(),
+      totalProducts,
+      chineseSellerCount,
+      markedAsins,
+      url: window.location.href
+    };
+    
+    // 保存到localStorage
+    localStorage.setItem(`amazonCnSeller_${urlPath}`, JSON.stringify(saveData));
+    console.log('已保存扫描结果到localStorage:', saveData);
+    
+  } catch (error) {
+    console.error('保存扫描结果时出错:', error);
+  }
+}
+
+/**
+ * 从localStorage恢复搜索结果
+ * @returns {boolean} 是否成功恢复
+ */
+function restoreSearchResults() {
+  try {
+    // 提取当前URL的路径部分作为KEY
+    const urlPath = window.location.pathname + window.location.search;
+    const savedDataJson = localStorage.getItem(`amazonCnSeller_${urlPath}`);
+    
+    if (!savedDataJson) {
+      console.log('未找到保存的扫描结果');
+      return false;
+    }
+    
+    // 解析保存的数据
+    const savedData = JSON.parse(savedDataJson);
+    console.log('找到保存的扫描结果:', savedData);
+    
+    // 检查数据是否过期(超过30分钟)
+    const now = Date.now();
+    const saveTime = savedData.timestamp;
+    const thirtyMinutes = 30 * 60 * 1000;
+    
+    if (now - saveTime > thirtyMinutes) {
+      console.log('保存的扫描结果已过期');
+      localStorage.removeItem(`amazonCnSeller_${urlPath}`);
+      return false;
+    }
+    
+    // 恢复扫描状态显示
+    const statusContainer = ensureScanStatusContainer();
+    if (statusContainer) {
+      updateScanStatus(
+        false, 
+        savedData.totalProducts, 
+        savedData.totalProducts, 
+        `已恢复上次扫描结果 (${new Date(saveTime).toLocaleTimeString()})`,
+        false,
+        100
+      );
+    }
+    
+    // 查找产品卡片并重新标记
+    const productCards = getProductCards();
+    if (!productCards || productCards.length === 0) {
+      console.log('无法恢复标记，未找到产品卡片');
+      return false;
+    }
+    
+    // 处理每个已保存的ASIN
+    let restoredCount = 0;
+    for (const { asin } of savedData.markedAsins) {
+      if (!asin) continue;
+      
+      // 查找匹配ASIN的产品卡片
+      const matchingCards = Array.from(productCards).filter(card => {
+        // 直接从属性获取ASIN
+        if (card.getAttribute('data-asin') === asin) return true;
+        
+        // 从链接中查找ASIN
+        const links = card.querySelectorAll('a[href*="/dp/"], a[href*="/gp/product/"]');
+        for (const link of links) {
+          if (link.href.includes(`/dp/${asin}`) || link.href.includes(`/product/${asin}`)) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      // 如果找到匹配的卡片，重新标记
+      for (const card of matchingCards) {
+        try {
+          // 标记为中国卖家
+          markChineseSeller(card);
+          restoredCount++;
+        } catch (error) {
+          console.error(`恢复标记卡片时出错 (ASIN: ${asin}):`, error);
+        }
+      }
+    }
+    
+    console.log(`已恢复 ${restoredCount}/${savedData.markedAsins.length} 个中国卖家标记`);
+    
+    // 添加过滤控制面板
+    addFilterControls();
+    
+    // 更新过滤按钮状态
+    updateFilterButtonsState(settings.filterMode);
+    
+    return restoredCount > 0;
+    
+  } catch (error) {
+    console.error('恢复扫描结果时出错:', error);
+    return false;
+  }
+}
+
+/**
  * 处理亚马逊搜索结果页面
  * 扫描所有产品卡片，识别卖家，统计中国卖家数量
  */
 async function processSearchPage() {
-  console.log('开始处理搜索页面 - URL:', window.location.href);
-  console.log('当前页面类型:', currentPageType);
-  
-  // 记录开始时间，用于计算耗时
-  const startTime = Date.now();
-  
   try {
-    // 检查是否正在扫描中，避免重复扫描
-    if (isScanning) {
-      console.log('[警告] 已有扫描进行中，跳过');
-      updateScanStatus(true, 0, 0, '已有扫描进行中...，请等待完成');
+    if (!isPluginEnabled()) {
+      console.log('插件已禁用，不处理搜索页面');
       return;
     }
     
-    // 设置正在扫描标志
-    isScanning = true;
-    console.log('[重要] 设置扫描标志 isScanning =', isScanning);
+    console.log('开始处理搜索页面...');
     
-    // 确保状态容器存在
-    const statusContainer = ensureScanStatusContainer();
+    // 创建扫描状态容器
+    ensureScanStatusContainer();
     
-    // 更新扫描状态，提示正在准备扫描
-    updateScanStatus(true, 0, 0, '准备扫描...');
+    // 更新扫描状态为进行中
+    updateScanStatus(true, 0, 0, '正在准备扫描...');
     
-    // 获取产品卡片
-    console.log('尝试获取产品卡片...');
-    let productCards = getProductCards();
-    console.log(`获取产品卡片结果: ${productCards ? productCards.length : 0} 个`);
-    
-    // 如果没有找到产品卡片，尝试触发懒加载
-    if (!productCards || productCards.length === 0) {
-      console.log('[警告] 未找到产品卡片，尝试触发懒加载...');
-      updateScanStatus(true, 0, 0, '未找到产品卡片，尝试加载更多内容...');
-      
-      try {
-        const lazyLoadSuccess = await triggerLazyLoading();
-        console.log('懒加载触发结果:', lazyLoadSuccess ? '成功' : '失败');
-        
-        // 懒加载后重新获取产品卡片
-        productCards = getProductCards();
-        console.log(`懒加载后获取产品卡片结果: ${productCards ? productCards.length : 0} 个`);
-        
-        // 如果还是没有找到，尝试更加激进的方法来找到产品
-        if (!productCards || productCards.length === 0) {
-          console.log('尝试强制重新渲染页面后再次扫描...');
-          // 修改页面偏移以强制触发布局重新计算
-          window.scrollTo(0, 0);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          window.scrollTo(0, 200);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // 再次尝试获取产品卡片
-          productCards = getProductCards();
-          console.log(`强制重新渲染后获取产品卡片结果: ${productCards ? productCards.length : 0} 个`);
-        }
-      } catch (lazyLoadError) {
-        console.error('触发懒加载时出错:', lazyLoadError);
-        // 即使懒加载失败，仍然尝试获取产品卡片
-        productCards = getProductCards();
-      }
-    }
-    
-    // 最终检查是否有产品卡片
-    if (!productCards || productCards.length === 0) {
-      console.log('[错误] 在多次尝试后仍未找到产品卡片');
-      updateScanStatus(false, 0, 0, '未找到任何产品卡片，请尝试刷新页面');
-      isScanning = false;
+    // 尝试恢复之前的搜索结果
+    const savedResults = await restoreSearchResults();
+    if (savedResults && savedResults.results.length > 0) {
+      console.log(`恢复了之前的扫描结果: ${savedResults.results.length} 个产品`);
+      updateScanStatus(false, savedResults.totalProducts, savedResults.totalProducts, '使用缓存的扫描结果');
+      updateScanStats({
+        totalScanned: savedResults.totalProducts,
+        chineseSellerCount: savedResults.chineseSellerCount,
+        percentage: savedResults.chineseSellerCount / savedResults.totalProducts * 100
+      });
       return;
     }
     
-    console.log(`开始处理 ${productCards.length} 个产品卡片`);
-    updateScanStatus(true, 0, productCards.length, `开始扫描 ${productCards.length} 个产品...`);
+    // 确保卖家检测器已加载
+    await loadSellerDetector();
     
-    // 使用批次处理产品卡片，避免浏览器卡顿
-    const batchSize = 5; // 每次处理5个
-    const totalBatches = Math.ceil(productCards.length / batchSize);
+    // 触发延迟加载以显示更多产品
+    await triggerLazyLoading();
     
-    let processedCount = 0;
-    let chineseSellerCount = 0;
-    let nonChineseSellerCount = 0;
-    let unknownSellerCount = 0;
+    // 获取所有产品卡片
+    let allCards = getProductCards();
     
-    // 处理每个批次
-    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-      // 检查是否需要停止扫描（例如用户离开页面）
-      if (!isScanning) {
-        console.log('扫描被中断，停止处理');
-        updateScanStatus(false, processedCount, productCards.length, '扫描已中断');
-        return;
+    // 如果找不到产品卡片，重试几次
+    if (allCards.length === 0) {
+      for (let i = 0; i < 3; i++) {
+        console.log(`未找到产品卡片，尝试重试 ${i + 1}/3...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        allCards = getProductCards();
+        if (allCards.length > 0) break;
       }
+    }
+    
+    if (allCards.length === 0) {
+      console.log('无法找到任何产品卡片，请检查选择器是否正确');
+      updateScanStatus(false, 0, 0, '未找到产品卡片');
+      return;
+    }
+    
+    // 更新总数
+    const totalCards = allCards.length;
+    console.log(`找到 ${totalCards} 个产品卡片`);
+    
+    // 更新扫描状态
+    updateScanStatus(true, 0, totalCards, '开始扫描产品...');
+    
+    // 包含中国卖家的产品卡片数组
+    const chineseSellerCards = [];
+    
+    // 每个批次处理的卡片数量
+    const batchSize = 10;
+    
+    // 分批处理产品卡片以避免阻塞UI
+    for (let i = 0; i < totalCards; i += batchSize) {
+      // 当前批次的卡片
+      const batch = allCards.slice(i, i + batchSize);
       
-      const startIdx = batchIndex * batchSize;
-      const endIdx = Math.min((batchIndex + 1) * batchSize, productCards.length);
-      const currentBatch = productCards.slice(startIdx, endIdx);
+      // 更新扫描状态
+      const current = Math.min(i + batchSize, totalCards);
+      const progressPercent = Math.round((current / totalCards) * 100);
+      updateScanStatus(true, current, totalCards, `已扫描 ${current}/${totalCards} 个产品`, false, progressPercent);
       
-      console.log(`处理批次 ${batchIndex + 1}/${totalBatches}, 卡片 ${startIdx + 1} 到 ${endIdx}`);
+      // 等待一小段时间以避免UI阻塞
+      await new Promise(resolve => setTimeout(resolve, 50));
       
-      // 处理这个批次的卡片
-      for (const card of currentBatch) {
+      // 处理当前批次的卡片
+      for (const card of batch) {
         try {
-          console.log(`处理卡片 ${processedCount + 1}/${productCards.length}`);
+          // 检查是否已经处理过
+          if (card.dataset.processed === 'true') continue;
           
-          // 处理单个产品卡片
-          const result = await processProductCard(card);
+          // 添加卖家信息到卡片
+          await addSellerInfoToCard(card);
           
-          // 根据结果更新统计信息
-          if (result) {
-            processedCount++;
-            
-            if (result.isChineseSeller) {
-              console.log('识别为中国卖家:', result.sellerName);
-              chineseSellerCount++;
-              
-              // 如果已经启用了只显示中国卖家的过滤模式，立即应用标记
-              if (settings.filterMode === 'chinese-only') {
-                // 显示当前卡片
-                const container = findProductCardParent(card);
-                if (container) {
-                  container.style.display = '';
-                }
-              } 
-              // 如果已经启用了隐藏中国卖家的过滤模式，立即应用标记
-              else if (settings.filterMode === 'hide-chinese') {
-                // 隐藏当前卡片
-                const container = findProductCardParent(card);
-                if (container) {
-                  container.style.display = 'none';
-                }
-              }
-            } else if (result.isUnknown) {
-              console.log('未能识别卖家类型');
-              unknownSellerCount++;
-            } else {
-              console.log('识别为非中国卖家:', result.sellerName);
-              nonChineseSellerCount++;
-              
-              // 应用过滤模式
-              if (settings.filterMode === 'chinese-only') {
-                // 隐藏当前卡片
-                const container = findProductCardParent(card);
-                if (container) {
-                  container.style.display = 'none';
-                }
-              }
-            }
-            
-            // 更新扫描状态
-            const progressPercent = Math.floor((processedCount / productCards.length) * 100);
-            const statusMessage = `已扫描 ${processedCount}/${productCards.length} 个产品，发现 ${chineseSellerCount} 个中国卖家`;
-            updateScanStatus(true, processedCount, productCards.length, statusMessage, false, progressPercent);
+          // 如果已标记为中国卖家，添加到结果列表
+          if (card.dataset.chineseSeller === 'true') {
+            chineseSellerCards.push(card);
           }
         } catch (cardError) {
-          console.error('处理卡片时出错:', cardError);
-          // 即使出错也继续处理下一个卡片
-          processedCount++;
-          unknownSellerCount++;
+          console.error(`处理产品卡片时出错:`, cardError);
+        }
+      }
+    }
+    
+    // 计算结果统计
+    const chineseSellerCount = chineseSellerCards.length;
+    const percentage = totalCards > 0 ? (chineseSellerCount / totalCards * 100) : 0;
+    
+    // 更新扫描状态为完成
+    updateScanStatus(false, totalCards, totalCards, `扫描完成: 找到 ${chineseSellerCount} 个中国卖家 (${percentage.toFixed(1)}%)`);
+    
+    // 更新统计信息
+    updateScanStats({
+      totalScanned: totalCards,
+      chineseSellerCount,
+      percentage
+    });
+    
+    // 保存扫描结果
+    const results = chineseSellerCards.map(card => {
+      return {
+        asin: card.dataset.asin || '',
+        sellerName: card.dataset.sellerName || '',
+        productUrl: card.dataset.productUrl || '',
+        sellerUrl: card.dataset.sellerUrl || '',
+        features: card.dataset.features || ''
+      };
+    });
+    
+    saveSearchResults(totalCards, chineseSellerCount, results);
+    
+    console.log(`搜索页面处理完成: 总共 ${totalCards} 个产品, ${chineseSellerCount} 个中国卖家 (${percentage.toFixed(1)}%)`);
+    
+    // 显示扫描完成面板
+    showScanCompletedPanel({
+      totalScanned: totalCards,
+      chineseSellerCount,
+      percentage
+    });
+    
+  } catch (error) {
+    console.error('处理搜索页面时出错:', error);
+    updateScanStatus(false, 0, 0, '扫描出错，请重试');
+  }
+}
+
+// 添加卖家信息到产品卡片
+async function addSellerInfoToCard(card) {
+  try {
+    // 检查卡片是否已处理过
+    if (card.dataset.processed === 'true') return;
+    
+    // 标记卡片为已处理
+    card.dataset.processed = 'true';
+    
+    // 获取卡片ID
+    const cardId = Date.now() + '-' + Math.floor(Math.random() * 10000);
+    card.dataset.cardId = cardId;
+    
+    // 添加产品URL到数据集
+    let productUrl = '';
+    const titleElement = card.querySelector('h2 a, h5 a, .a-size-base-plus a, .a-size-mini a, [data-cy="title-recipe"] a');
+    
+    if (titleElement && titleElement.href) {
+      productUrl = titleElement.href;
+      card.dataset.productUrl = productUrl;
+      
+      // 提取ASIN
+      const asinMatch = productUrl.match(/\/([A-Z0-9]{10})(?:\/|\?|$)/);
+      if (asinMatch && asinMatch[1]) {
+        card.dataset.asin = asinMatch[1];
+      }
+    }
+    
+    // 获取卖家名称
+    let sellerName = null;
+    
+    // 尝试从卡片元素内容中提取卖家名称
+    const sellerSelectors = [
+      '.a-row .a-size-base:not([class*="a-color-price"]):not([class*="a-text-price"])',
+      '.a-row [data-cy="seller-name"]',
+      '.a-row .a-size-small:not([class*="a-color-price"]):not([class*="a-text-price"])',
+      '.a-row .a-size-base-plus:not([class*="a-color-price"]):not([class*="a-text-price"])',
+      '.a-row a[href*="seller="]',
+      '.s-seller-details',
+      '[data-component-type="s-seller-data"]',
+      '.a-row:nth-child(2) span.a-size-small',
+      '.s-title-instructions-style span',
+      '.a-box-inner .a-row:not([class*="a-price"])'
+    ];
+    
+    for (const selector of sellerSelectors) {
+      const elements = card.querySelectorAll(selector);
+      
+      for (const element of elements) {
+        // 忽略价格和评分元素
+        if (
+          element.textContent.includes('$') || 
+          element.textContent.includes('€') ||
+          element.textContent.includes('£') ||
+          element.textContent.includes('stars') ||
+          element.textContent.includes('rating') ||
+          element.className.includes('price') ||
+          element.className.includes('stars') ||
+          element.className.includes('rating') ||
+          element.parentElement.className.includes('price') ||
+          element.parentElement.className.includes('stars') ||
+          element.parentElement.className.includes('rating')
+        ) {
+          continue;
+        }
+        
+        // 查找包含"by"的文本，这通常表示卖家信息
+        const text = element.textContent.trim();
+        const byMatch = text.match(/(?:sold|Ships|by|from)[\s:]+([^|.]+)(?:\||.|$)/i);
+        
+        if (byMatch && byMatch[1]) {
+          sellerName = byMatch[1].trim();
+          break;
+        }
+        
+        // 尝试查找卖家链接
+        const sellerLink = element.querySelector('a[href*="seller="]');
+        if (sellerLink) {
+          sellerName = sellerLink.textContent.trim();
+          
+          // 提取卖家ID
+          const sellerIdMatch = sellerLink.href.match(/seller=([A-Z0-9]+)/i);
+          if (sellerIdMatch && sellerIdMatch[1]) {
+            card.dataset.sellerId = sellerIdMatch[1];
+          }
+          
+          // 提取卖家URL
+          card.dataset.sellerUrl = sellerLink.href;
+          
+          break;
         }
       }
       
-      // 批次处理完成后，暂停一下，避免浏览器卡顿
-      await new Promise(resolve => setTimeout(resolve, 50));
+      if (sellerName) break;
     }
     
-    // 扫描完成，更新状态
-    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`扫描完成：处理了 ${processedCount} 个产品，发现 ${chineseSellerCount} 个中国卖家，耗时 ${elapsedTime} 秒`);
-    updateScanStatus(false, processedCount, productCards.length, 
-      `扫描完成：找到 ${chineseSellerCount} 个中国卖家 (共 ${processedCount} 个产品)，耗时 ${elapsedTime} 秒`);
-    
-    // 确保添加过滤控件
-    if (!document.getElementById('cn-seller-filter-controls')) {
-      addFilterControls();
+    // 如果没有找到卖家信息，并且有产品URL，尝试从产品页面获取
+    if (!sellerName && productUrl) {
+      try {
+        console.log(`从产品页面获取卖家信息: ${productUrl}`);
+        
+        // 避免频繁请求
+        await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 200));
+        
+        const sellerInfo = await fetchSellerInfoFromProductPage(productUrl);
+        
+        if (sellerInfo && sellerInfo.sellerName) {
+          sellerName = sellerInfo.sellerName;
+          card.dataset.sellerName = sellerName;
+          
+          if (sellerInfo.sellerId) {
+            card.dataset.sellerId = sellerInfo.sellerId;
+          }
+          
+          if (sellerInfo.sellerUrl) {
+            card.dataset.sellerUrl = sellerInfo.sellerUrl;
+          }
+          
+          if (sellerInfo.isConfirmedChinese) {
+            card.dataset.isConfirmedChinese = 'true';
+          }
+          
+          // 使用卖家特征函数检查是否是中国卖家
+          const features = getChineseFeatures(sellerName, sellerInfo);
+          if (features.length > 0 || sellerInfo.isConfirmedChinese) {
+            card.dataset.chineseSeller = 'true';
+            card.dataset.features = features.join(', ');
+            
+            // 添加可视化标记
+            addVisualMarker(card, sellerName, features, sellerInfo);
+            
+            // 更新卖家列表
+            updateSellerListInPanel(cardId, sellerName, card.dataset.asin);
+          }
+        }
+      } catch (error) {
+        console.error(`从产品页面获取卖家信息失败:`, error);
+      }
+      
+      return;
     }
     
-    // 应用当前保存的过滤模式
-    if (settings.filterMode && settings.filterMode !== 'all') {
-      console.log(`应用保存的过滤模式: ${settings.filterMode}`);
-      applyFilterMode(settings.filterMode);
+    // 如果找到卖家名称，检查是否为中国卖家
+    if (sellerName) {
+      card.dataset.sellerName = sellerName;
+      
+      // 检查是否为中国卖家
+      const sellerDetector = window.SellerDetector.getInstance();
+      const isChineseSeller = sellerDetector.isChineseSeller(sellerName);
+      
+      if (isChineseSeller) {
+        card.dataset.chineseSeller = 'true';
+        
+        // 获取中国特征
+        const features = getChineseFeatures(sellerName);
+        card.dataset.features = features.join(', ');
+        
+        // 添加可视化标记
+        addVisualMarker(card, sellerName, features);
+        
+        // 更新卖家列表
+        updateSellerListInPanel(cardId, sellerName, card.dataset.asin);
+      }
     }
-    
-    // 重置正在扫描标志
-    isScanning = false;
-    console.log('[重要] 重置扫描标志 isScanning =', isScanning);
   } catch (error) {
-    console.error('处理搜索页面时出错:', error);
-    // 确保重置扫描状态
-    isScanning = false;
-    console.log('[错误恢复] 重置扫描标志 isScanning =', isScanning);
-    updateScanStatus(false, 0, 0, `扫描出错: ${error.message}`);
+    console.error('添加卖家信息到产品卡片时出错:', error);
+  }
+}
+
+// 显示卖家详情面板
+function showSellerDetailPanel(sellerName, sellerInfo, asin, cardId) {
+  try {
+    // 移除先前的面板
+    const existingPanel = document.querySelector('.seller-detail-panel');
+    if (existingPanel) {
+      existingPanel.remove();
+    }
+    
+    // 创建新面板
+    const panel = document.createElement('div');
+    panel.className = 'seller-detail-panel';
+    panel.style.position = 'fixed';
+    panel.style.top = '50%';
+    panel.style.left = '50%';
+    panel.style.transform = 'translate(-50%, -50%)';
+    panel.style.width = '80%';
+    panel.style.maxWidth = '600px';
+    panel.style.maxHeight = '80vh';
+    panel.style.overflowY = 'auto';
+    panel.style.backgroundColor = 'white';
+    panel.style.borderRadius = '8px';
+    panel.style.boxShadow = '0 4px 20px rgba(0,0,0,0.25)';
+    panel.style.zIndex = '9999';
+    panel.style.padding = '20px';
+    panel.style.fontFamily = 'Arial, sans-serif';
+    
+    // 添加关闭按钮
+    const closeButton = document.createElement('button');
+    closeButton.textContent = '×';
+    closeButton.style.position = 'absolute';
+    closeButton.style.top = '10px';
+    closeButton.style.right = '10px';
+    closeButton.style.background = 'none';
+    closeButton.style.border = 'none';
+    closeButton.style.fontSize = '24px';
+    closeButton.style.cursor = 'pointer';
+    closeButton.style.color = '#333';
+    
+    closeButton.addEventListener('click', () => {
+      panel.remove();
+    });
+    
+    panel.appendChild(closeButton);
+    
+    // 添加标题
+    const title = document.createElement('h2');
+    title.textContent = `卖家详情: ${sellerName}`;
+    title.style.margin = '0 0 20px 0';
+    title.style.borderBottom = '1px solid #eee';
+    title.style.paddingBottom = '10px';
+    title.style.color = '#d30000';
+    panel.appendChild(title);
+    
+    // 内容容器
+    const content = document.createElement('div');
+    
+    // 添加基本信息
+    const basicInfo = document.createElement('div');
+    basicInfo.style.marginBottom = '20px';
+    
+    // 信息行创建函数
+    const createInfoRow = (label, value, isHighlight = false) => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.margin = '8px 0';
+      
+      const labelElement = document.createElement('div');
+      labelElement.textContent = label;
+      labelElement.style.fontWeight = 'bold';
+      labelElement.style.width = '120px';
+      labelElement.style.flexShrink = '0';
+      
+      const valueElement = document.createElement('div');
+      valueElement.textContent = value || '未知';
+      valueElement.style.flex = '1';
+      if (isHighlight) {
+        valueElement.style.color = '#d30000';
+        valueElement.style.fontWeight = 'bold';
+      }
+      
+      row.appendChild(labelElement);
+      row.appendChild(valueElement);
+      
+      return row;
+    };
+    
+    // 添加卖家ID信息
+    if (sellerInfo && sellerInfo.sellerId) {
+      basicInfo.appendChild(createInfoRow('卖家ID:', sellerInfo.sellerId));
+    }
+    
+    // 添加卖家国家信息
+    const sellerCountry = (sellerInfo && sellerInfo.sellerCountry) ? sellerInfo.sellerCountry : '未确认';
+    basicInfo.appendChild(createInfoRow('卖家国家:', sellerCountry, sellerCountry === 'China'));
+    
+    // 添加确信度信息
+    if (sellerInfo && sellerInfo.confidence) {
+      const confidencePercent = Math.round(sellerInfo.confidence * 100);
+      basicInfo.appendChild(createInfoRow('确信度:', `${confidencePercent}%`, confidencePercent > 70));
+    }
+    
+    // 添加企业名称
+    if (sellerInfo && sellerInfo.businessName) {
+      basicInfo.appendChild(createInfoRow('企业名称:', sellerInfo.businessName, true));
+    }
+    
+    // 添加企业地址
+    if (sellerInfo && sellerInfo.businessAddress) {
+      const addressRow = createInfoRow('企业地址:', '', true);
+      
+      // 将地址拆分为多行显示
+      const addressElement = addressRow.querySelector('div:last-child');
+      const addressLines = sellerInfo.businessAddress.split('\n');
+      
+      addressLines.forEach((line, index) => {
+        const lineElement = document.createElement('div');
+        lineElement.textContent = line.trim();
+        if (index > 0) {
+          lineElement.style.marginTop = '4px';
+        }
+        addressElement.appendChild(lineElement);
+      });
+      
+      basicInfo.appendChild(addressRow);
+    }
+    
+    // 添加中国特征列表
+    const features = getChineseFeatures(sellerName, sellerInfo);
+    if (features.length > 0) {
+      const featuresTitle = document.createElement('h3');
+      featuresTitle.textContent = '中国卖家特征:';
+      featuresTitle.style.margin = '15px 0 10px 0';
+      featuresTitle.style.fontSize = '16px';
+      
+      const featuresList = document.createElement('ul');
+      featuresList.style.margin = '0';
+      featuresList.style.paddingLeft = '20px';
+      
+      features.forEach(feature => {
+        const featureItem = document.createElement('li');
+        featureItem.textContent = feature;
+        featureItem.style.margin = '5px 0';
+        featuresList.appendChild(featureItem);
+      });
+      
+      content.appendChild(featuresTitle);
+      content.appendChild(featuresList);
+    }
+    
+    // 添加链接部分
+    const linksSection = document.createElement('div');
+    linksSection.style.marginTop = '25px';
+    linksSection.style.borderTop = '1px solid #eee';
+    linksSection.style.paddingTop = '15px';
+    
+    // 创建链接函数
+    const createLink = (label, url) => {
+      if (!url) return null;
+      
+      const link = document.createElement('a');
+      link.textContent = label;
+      link.href = url;
+      link.target = '_blank';
+      link.style.display = 'inline-block';
+      link.style.margin = '0 15px 10px 0';
+      link.style.padding = '6px 12px';
+      link.style.backgroundColor = '#f0f0f0';
+      link.style.borderRadius = '4px';
+      link.style.textDecoration = 'none';
+      link.style.color = '#0066c0';
+      link.style.fontWeight = 'bold';
+      
+      return link;
+    };
+    
+    // 添加产品页面链接
+    if (asin) {
+      const productUrl = `https://www.amazon.com/dp/${asin}`;
+      const productLink = createLink('查看产品页面', productUrl);
+      if (productLink) linksSection.appendChild(productLink);
+    }
+    
+    // 添加卖家页面链接
+    if (sellerInfo && sellerInfo.sellerUrl) {
+      const sellerLink = createLink('查看卖家页面', sellerInfo.sellerUrl);
+      if (sellerLink) linksSection.appendChild(sellerLink);
+    }
+    
+    content.appendChild(basicInfo);
+    content.appendChild(linksSection);
+    panel.appendChild(content);
+    
+    // 添加到页面
+    document.body.appendChild(panel);
+    
+    // 添加点击外部关闭功能
+    const handleOutsideClick = (event) => {
+      if (!panel.contains(event.target)) {
+        panel.remove();
+        document.removeEventListener('click', handleOutsideClick);
+      }
+    };
+    
+    // 延迟添加点击监听，避免立即触发
+    setTimeout(() => {
+      document.addEventListener('click', handleOutsideClick);
+    }, 100);
+    
+  } catch (error) {
+    console.error('显示卖家详情面板时出错:', error);
   }
 }
 
@@ -819,19 +1481,41 @@ async function fetchSellerInfoFromProductPage(url) {
   try {
     console.log('尝试从商品页面获取卖家信息:', url);
     
-    // 使用fetch API获取页面内容
-    const response = await fetch(url, {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'User-Agent': window.navigator.userAgent
-      }
-    });
+    // 使用fetch API获取页面内容，添加重试逻辑
+    let response = null;
+    let retryCount = 0;
+    const maxRetries = 3;
     
-    if (!response.ok) {
-      console.error(`获取产品页面失败: ${response.status} ${response.statusText}`);
+    while (retryCount < maxRetries) {
+      try {
+        response = await fetch(url, {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': window.navigator.userAgent,
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          },
+          // 添加随机参数避免缓存
+          cache: 'no-store'
+        });
+        
+        if (response.ok) break;
+        
+        console.warn(`尝试 ${retryCount + 1}/${maxRetries} 失败: ${response.status} ${response.statusText}`);
+        retryCount++;
+        // 指数退避策略
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
+      } catch (fetchError) {
+        console.warn(`尝试 ${retryCount + 1}/${maxRetries} 出错:`, fetchError);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retryCount)));
+      }
+    }
+    
+    if (!response || !response.ok) {
+      console.error(`获取产品页面失败: ${response ? `${response.status} ${response.statusText}` : '无响应'}`);
       return null;
     }
     
@@ -855,7 +1539,7 @@ async function fetchSellerInfoFromProductPage(url) {
     let sellerUrl = null;
     let sellerId = null;
     
-    // 方法1: 直接从产品页面提取卖家链接
+    // 方法1: 直接从产品页面提取卖家链接 - 更新选择器，确保更好的兼容性
     const sellerLinkSelectors = [
       '#merchant-info a', // 最常见的卖家信息位置
       '#sellerProfileTriggerId', // 另一个常见位置
@@ -867,36 +1551,449 @@ async function fetchSellerInfoFromProductPage(url) {
       'a[href*="seller="]',
       '[id*="merchant"] a', // 含有merchant的元素中的链接
       '[class*="seller"] a', // 含有seller的元素中的链接
-      '[class*="merchant"] a' // 含有merchant的元素中的链接
+      '[class*="merchant"] a', // 含有merchant的元素中的链接
+      '.a-row a[href*="seller="]', // 包含卖家链接的行
+      '.a-section a[href*="seller="]', // 包含卖家链接的区域
+      '.offer-display-feature-text', // 卖家信息容器
+      '.tabular-buybox-text', // 表格式购买框中的文本
+      // 新增选择器，处理更多情况
+      '.merchant-info a',
+      '#bylineInfo',
+      'div[id*="seller"] a',
+      'div[class*="seller"] a',
+      'span[class*="seller"] a',
+      'a.a-link-normal[href*="seller"]',
+      '#sold-by a',
+      '[data-feature-name="shipsFromSoldBy"] a'
     ];
     
     for (const selector of sellerLinkSelectors) {
       try {
-        const sellerElement = doc.querySelector(selector);
-        if (sellerElement && sellerElement.href && sellerElement.textContent) {
-          sellerName = sellerElement.textContent.trim();
-          sellerUrl = sellerElement.href;
-          
-          // 尝试从URL中提取sellerId
-          const idMatch = sellerUrl.match(/seller=([A-Z0-9]+)/i);
-          if (idMatch && idMatch[1]) {
-            sellerId = idMatch[1];
+        const sellerElements = doc.querySelectorAll(selector);
+        if (!sellerElements || sellerElements.length === 0) continue;
+        
+        for (const sellerElement of sellerElements) {
+          // 检查是否为链接元素
+          if (sellerElement.tagName === 'A' && sellerElement.href && sellerElement.textContent) {
+            sellerName = sellerElement.textContent.trim();
+            sellerUrl = sellerElement.href;
+            
+            // 如果链接不是绝对URL，转换为绝对URL
+            if (sellerUrl && !sellerUrl.startsWith('http')) {
+              // 处理相对URL
+              const baseUrl = new URL(url).origin;
+              sellerUrl = new URL(sellerUrl, baseUrl).href;
+            }
+            
+            // 尝试从URL中提取sellerId
+            const idMatch = sellerUrl.match(/seller=([A-Z0-9]+)/i);
+            if (idMatch && idMatch[1]) {
+              sellerId = idMatch[1];
+            }
+            
+            // 排除Amazon自己
+            if (sellerName.toLowerCase().includes('amazon')) {
+              console.log('排除Amazon自营卖家:', sellerName);
+              sellerName = null;
+              sellerUrl = null;
+              sellerId = null;
+              continue;
+            }
+            
+            console.log(`在产品页面找到卖家: ${sellerName}, URL: ${sellerUrl}, ID: ${sellerId || '未知'}`);
+            break;
           }
-          
-          // 排除Amazon自己
-          if (sellerName.toLowerCase().includes('amazon')) {
-            console.log('排除Amazon自营卖家:', sellerName);
-            sellerName = null;
-            sellerUrl = null;
-            sellerId = null;
-            continue;
+          // 检查是否包含卖家链接
+          else {
+            const links = sellerElement.querySelectorAll('a');
+            for (const link of links) {
+              if (link.href && link.href.includes('seller=')) {
+                sellerName = link.textContent.trim();
+                sellerUrl = link.href;
+                
+                // 如果链接不是绝对URL，转换为绝对URL
+                if (sellerUrl && !sellerUrl.startsWith('http')) {
+                  // 处理相对URL
+                  const baseUrl = new URL(url).origin;
+                  sellerUrl = new URL(sellerUrl, baseUrl).href;
+                }
+                
+                // 尝试从URL中提取sellerId
+                const idMatch = sellerUrl.match(/seller=([A-Z0-9]+)/i);
+                if (idMatch && idMatch[1]) {
+                  sellerId = idMatch[1];
+                }
+                
+                // 排除Amazon自己
+                if (sellerName.toLowerCase().includes('amazon')) {
+                  console.log('排除Amazon自营卖家:', sellerName);
+                  sellerName = null;
+                  sellerUrl = null;
+                  sellerId = null;
+                  continue;
+                }
+                
+                console.log(`在产品页面找到卖家: ${sellerName}, URL: ${sellerUrl}, ID: ${sellerId || '未知'}`);
+                break;
+              }
+            }
           }
-          
-          console.log(`在产品页面找到卖家: ${sellerName}, URL: ${sellerUrl}, ID: ${sellerId || '未知'}`);
-          break;
         }
+        
+        if (sellerName) break;
       } catch (error) {
         console.error(`使用选择器 "${selector}" 提取卖家信息时出错:`, error);
+      }
+    }
+    
+    // 方法4: 如果找到卖家URL，尝试从卖家页面提取更多信息（如国家信息）
+    if (sellerUrl) {
+      console.log(`尝试从卖家页面(C页面)获取更多信息: ${sellerUrl}`);
+      
+      try {
+        // 获取卖家页面内容，添加重试逻辑
+        let sellerResponse = null;
+        let sellerRetryCount = 0;
+        const sellerMaxRetries = 3;
+        
+        while (sellerRetryCount < sellerMaxRetries) {
+          try {
+            sellerResponse = await fetch(sellerUrl, {
+              method: 'GET',
+              credentials: 'same-origin',
+              headers: {
+                'Accept': 'text/html,application/xhtml+xml,application/xml',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'User-Agent': window.navigator.userAgent,
+                'Cache-Control': 'no-cache, no-store, must-revalidate'
+              },
+              cache: 'no-store'
+            });
+            
+            if (sellerResponse.ok) break;
+            
+            console.warn(`获取卖家页面尝试 ${sellerRetryCount + 1}/${sellerMaxRetries} 失败: ${sellerResponse.status}`);
+            sellerRetryCount++;
+            // 指数退避策略
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, sellerRetryCount)));
+          } catch (fetchError) {
+            console.warn(`获取卖家页面尝试 ${sellerRetryCount + 1}/${sellerMaxRetries} 出错:`, fetchError);
+            sellerRetryCount++;
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, sellerRetryCount)));
+          }
+        }
+        
+        if (!sellerResponse || !sellerResponse.ok) {
+          console.error(`获取卖家页面失败: ${sellerResponse ? `${sellerResponse.status} ${sellerResponse.statusText}` : '无响应'}`);
+          // 虽然获取C页面失败，但已有A-B页面的信息，所以继续
+        } else {
+          const sellerHtml = await sellerResponse.text();
+          console.log(`成功获取到卖家页面HTML，长度: ${sellerHtml.length} 字符`);
+          
+          // 解析卖家页面HTML
+          const sellerDoc = parser.parseFromString(sellerHtml, 'text/html');
+          
+          // 检查解析是否成功
+          if (!sellerDoc || !sellerDoc.body) {
+            console.error('卖家页面HTML解析失败');
+          } else {
+            console.log('卖家页面HTML解析成功，提取国家信息...');
+            
+            // 新增：特别处理 Detailed Seller Information 区块
+            const detailedSellerInfoSelectors = [
+              '#detailed-seller-info',
+              '#detailed-seller-information',
+              'h2:contains("Detailed Seller Information"), h2:contains("Business Information"), h2:contains("详细卖家信息")',
+              '.detailed-seller-info',
+              '[class*="seller-info"]',
+              '[id*="seller-info"]',
+              '.a-box:contains("Business Name")',
+              '.a-section:contains("Business Name")',
+              'div:contains("Business Name"):not(:contains("Business Name:"))',
+              // 扩展选择器，处理更多情况
+              'h2.a-spacing-none + div',
+              '.a-box-group .a-box',
+              'div[role="main"] .a-section'
+            ];
+            
+            let sellerDetailElement = null;
+            
+            for (const selector of detailedSellerInfoSelectors) {
+              try {
+                const elements = sellerDoc.querySelectorAll(selector);
+                console.log(`使用选择器 "${selector}" 查找卖家详情区块，找到 ${elements.length} 个元素`);
+                
+                for (const element of elements) {
+                  const text = element.textContent.trim();
+                  if (!text || text.length < 10) continue;
+                  
+                  // 检查是否包含关键信息
+                  if (
+                    text.includes('Business Name') || 
+                    text.includes('Business Address') || 
+                    text.includes('Seller Information') ||
+                    text.includes('Detailed Seller') ||
+                    text.includes('公司名称') || 
+                    text.includes('营业地址') ||
+                    text.includes('卖家信息')
+                  ) {
+                    console.log(`找到卖家详情区块: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
+                    sellerDetailElement = element;
+                    break;
+                  }
+                }
+                
+                if (sellerDetailElement) break;
+              } catch (error) {
+                console.error(`使用选择器 "${selector}" 查找卖家详情时出错:`, error);
+              }
+            }
+            
+            // 如果找到卖家详情区块，进行特殊处理
+            if (sellerDetailElement) {
+              console.log('找到卖家详情区块，开始提取关键信息');
+              
+              // 提取关键信息
+              const detailText = sellerDetailElement.textContent.trim();
+              
+              // 检查是否直接包含中国相关关键词
+              const chineseKeywords = [
+                'China', 'Beijing', 'Shanghai', 'Shenzhen', 'Guangzhou', 
+                'Hangzhou', 'Xiamen', '中国', '北京', '上海', '深圳', 
+                '广州', '杭州', '浙江', '广东', 'CN',
+                'PRC', 'P.R.C', 'People\'s Republic of China'
+              ];
+              
+              let isConfirmedChinese = false;
+              let businessName = '';
+              let businessAddress = '';
+              
+              // 尝试提取Business Name和Business Address
+              const nameMatch = detailText.match(/Business Name:?\s*([^\n]+)/i);
+              const addressMatch = detailText.match(/Business Address:?\s*([^]*)(?:(?:\n\s*\n)|$)/i);
+              
+              if (nameMatch && nameMatch[1]) {
+                businessName = nameMatch[1].trim();
+                console.log(`提取到企业名称: ${businessName}`);
+              }
+              
+              if (addressMatch && addressMatch[1]) {
+                businessAddress = addressMatch[1].trim();
+                console.log(`提取到企业地址: ${businessAddress}`);
+              }
+              
+              // 检查名称中是否包含"Shenzhen", "Guangzhou"等中国城市名称
+              if (businessName) {
+                const chineseCityInName = [
+                  'Shenzhen', 'Guangzhou', 'Shanghai', 'Beijing', 'Hangzhou', 
+                  'Yiwu', 'Ningbo', 'Xiamen', 'Dongguan', 'Foshan', 'Suzhou', 
+                  'Zhongshan', 'Taizhou'
+                ];
+                
+                for (const city of chineseCityInName) {
+                  if (businessName.includes(city)) {
+                    console.log(`企业名称包含中国城市名称: ${city}`);
+                    isConfirmedChinese = true;
+                    break;
+                  }
+                }
+              }
+              
+              // 检查地址中是否有中文字符
+              const hasChineseChars = /[\u4e00-\u9fff]/.test(businessAddress);
+              if (hasChineseChars) {
+                console.log('企业地址包含中文字符');
+                isConfirmedChinese = true;
+              }
+              
+              // 检查地址中是否包含中国关键词
+              for (const keyword of chineseKeywords) {
+                if (businessAddress.includes(keyword)) {
+                  console.log(`企业地址包含中国关键词: ${keyword}`);
+                  isConfirmedChinese = true;
+                  break;
+                }
+              }
+              
+              // 特殊情况：检查页面HTML中是否包含中文地址
+              if (!isConfirmedChinese) {
+                const fullHtml = sellerDoc.documentElement.outerHTML;
+                for (const keyword of chineseKeywords) {
+                  if (fullHtml.includes(keyword)) {
+                    console.log(`页面HTML中包含中国关键词: ${keyword}`);
+                    isConfirmedChinese = true;
+                    break;
+                  }
+                }
+                
+                // 检查页面HTML中是否有中文字符
+                if (!isConfirmedChinese && /[\u4e00-\u9fff]/.test(fullHtml)) {
+                  console.log('页面HTML中包含中文字符');
+                  isConfirmedChinese = true;
+                }
+              }
+              
+              // 检查是否包含国家代码"CN"
+              const countryCodeMatch = detailText.match(/\b(CN|CHN)\b/);
+              if (countryCodeMatch) {
+                console.log(`找到中国国家代码: ${countryCodeMatch[0]}`);
+                isConfirmedChinese = true;
+              }
+              
+              // 如果确认是中国卖家，返回详细信息
+              if (isConfirmedChinese) {
+                return {
+                  sellerName,
+                  sellerId,
+                  sellerUrl,
+                  sellerCountry: 'China',
+                  businessName,
+                  businessAddress,
+                  isConfirmedChinese: true,
+                  confidence: 0.95,
+                  detailSource: 'seller_page_detail'
+                };
+              }
+              
+              // 即使没有确认是中国卖家，也返回提取的详细信息
+              if (businessName || businessAddress) {
+                return {
+                  sellerName,
+                  sellerId,
+                  sellerUrl,
+                  businessName,
+                  businessAddress,
+                  isConfirmedChinese: false,
+                  confidence: 0.6,
+                  detailSource: 'seller_page_detail_uncertain'
+                };
+              }
+            }
+            
+            // 继续使用之前的提取逻辑（如果详细区块处理失败）
+            // 直接从HTML文本中检查中国关键词
+            const isChineseInHtml = 
+              sellerHtml.includes('China') || 
+              sellerHtml.includes('Beijing') || 
+              sellerHtml.includes('Shanghai') || 
+              sellerHtml.includes('Shenzhen') || 
+              sellerHtml.includes('Guangzhou') || 
+              sellerHtml.includes('Hangzhou') ||
+              sellerHtml.includes('Xiamen') ||
+              sellerHtml.includes('中国') ||
+              sellerHtml.includes('北京') ||
+              sellerHtml.includes('上海') ||
+              sellerHtml.includes('深圳') ||
+              sellerHtml.includes('广州') ||
+              sellerHtml.includes('杭州');
+            
+            if (isChineseInHtml) {
+              console.log('卖家页面HTML文本中包含中国地址关键词');
+              return {
+                sellerName,
+                sellerId,
+                sellerUrl,
+                sellerCountry: 'China',
+                isConfirmedChinese: true,
+                confidence: 0.95
+              };
+            }
+            
+            // 提取卖家国家信息
+            let sellerCountry = null;
+            let sellerBusinessInfo = null;
+            let confidence = 0;
+            
+            // 以下元素通常包含业务地址
+            const businessInfoSelectors = [
+              // 商家详情
+              '#page-section-detail-seller-info', 
+              '.seller-information',
+              'section[id*="seller"]',
+              'div[id*="seller"]',
+              'div[class*="seller"]',
+              
+              // 地址信息
+              '.a-row:not(:empty)',
+              '.a-section:not(:empty)',
+              '[class*="address"]',
+              '[class*="location"]',
+              'h1+div',
+              'h2+div',
+              '.address-section',
+              'p',
+              // 新增选择器
+              '.seller-address',
+              '.business-address',
+              '.seller-details',
+              '#sellerName ~ div',
+              '#sellerName + div',
+              'div[id*="business-address"]',
+              'div[class*="business-address"]',
+              'div[class*="seller-details"]',
+              'div[class*="info"]',
+              '#aag_detailsAbout'
+            ];
+            
+            // 遍历各个选择器
+            for (const selector of businessInfoSelectors) {
+              try {
+                const elements = sellerDoc.querySelectorAll(selector);
+                console.log(`使用选择器 "${selector}" 找到 ${elements.length} 个元素`);
+                
+                if (!elements || elements.length === 0) continue;
+                
+                for (const element of elements) {
+                  const text = element.textContent.trim();
+                  if (!text || text.length < 5) continue; // 忽略太短的文本
+                  
+                  // 检查中国相关关键词
+                  const chineseKeywordsInElement = [
+                    'China', 'Beijing', 'Shanghai', 'Shenzhen', 'Guangzhou', 'Hangzhou',
+                    'Xiamen', 'Chengdu', 'Nanjing', 'Tianjin', 'Wuhan', 'Chongqing',
+                    'Dongguan', 'Suzhou', 'Zhongshan', 'Ningbo', 'Zhejiang', 'Guangdong', 'Jiangsu',
+                    // 添加更多关键词
+                    'PRC', 'P.R.C', 'People\'s Republic of China', 'CN',
+                    '中国', '广东', '深圳', '上海', '北京', '浙江', '杭州', '义乌'
+                  ];
+                  
+                  for (const keyword of chineseKeywordsInElement) {
+                    if (text.includes(keyword)) {
+                      console.log(`找到中国关键词: ${keyword}`);
+                      sellerCountry = 'China';
+                      sellerBusinessInfo = text;
+                      confidence = 0.9;
+                      break;
+                    }
+                  }
+                  
+                  if (sellerCountry) break;
+                }
+                
+                if (sellerCountry) break;
+                
+              } catch (error) {
+                console.error(`使用选择器 "${selector}" 提取卖家国家信息时出错:`, error);
+              }
+            }
+            
+            // 如果确定是中国卖家，返回完整信息
+            if (sellerCountry === 'China') {
+              return {
+                sellerName,
+                sellerId,
+                sellerUrl,
+                sellerCountry,
+                sellerBusinessInfo,
+                isConfirmedChinese: true,
+                confidence
+              };
+            }
+          }
+        }
+      } catch (error) {
+        console.error('获取卖家页面信息时出错:', error);
+        // 错误处理 - 继续使用已有信息
       }
     }
     
@@ -909,42 +2006,89 @@ async function fetchSellerInfoFromProductPage(url) {
         '.tabular-buybox-text',
         '[class*="byline"]', // 含有byline的元素
         '[class*="seller"]', // 含有seller的元素
-        '[class*="merchant"]' // 含有merchant的元素
+        '[class*="merchant"]', // 含有merchant的元素
+        '.a-row:has(.a-color-secondary)', // 含有次要文本的行
+        '.a-section:has(.a-color-secondary)', // 含有次要文本的区域
+        '[class*="sold-by"]', // 含有sold-by的元素
+        '[class*="ships-from"]', // 含有ships-from的元素
+        // 新增选择器
+        '.merchant-info',
+        '#bylineInfo',
+        '[data-feature-name="bylineInfo"]',
+        '[data-feature-name="shipsFromSoldBy"]',
+        '#sold-by'
       ];
       
       for (const selector of sellerTextSelectors) {
         try {
-          const element = doc.querySelector(selector);
-          if (element && element.textContent) {
-            const text = element.textContent.trim();
-            
-            // 尝试匹配常见模式
-            const patterns = [
-              /(?:Sold|Ships) by[:\s]+([^.]+)/i, // "Sold by: Seller Name"
-              /(?:Sold|Ships) from[:\s]+([^.]+)/i, // "Sold from: Seller Name"
-              /Seller:?\s+([^.]+)/i, // "Seller: Seller Name"
-              /from\s+([^.]+)/i // "from Seller Name"
-            ];
-            
-            for (const pattern of patterns) {
-              const match = text.match(pattern);
-              if (match && match[1]) {
-                sellerName = match[1].trim();
-                
-                // 排除Amazon自己
-                if (sellerName.toLowerCase().includes('amazon')) {
-                  console.log('文本提取排除Amazon自营卖家:', sellerName);
-                  sellerName = null;
-                  continue;
+          const elements = doc.querySelectorAll(selector);
+          for (const element of elements) {
+            if (element && element.textContent) {
+              const text = element.textContent.trim();
+              
+              // 尝试匹配常见模式
+              const patterns = [
+                /(?:Sold|Ships) by[:\s]+([^.]+)/i, // "Sold by: Seller Name"
+                /(?:Sold|Ships) from[:\s]+([^.]+)/i, // "Sold from: Seller Name"
+                /Seller:?\s+([^.]+)/i, // "Seller: Seller Name"
+                /from\s+([^.]+)/i, // "from Seller Name"
+                /(?:Ships|Sold|Fulfilled)\s+by:?\s+([^.]+)/i, // "Ships by: Seller Name"
+                /(?:Seller|Vendor|Store):?\s+([^.]+)/i, // "Seller: Seller Name"
+                // 新增模式
+                /Brand:?\s+([^.]+)/i, // "Brand: Seller Name"
+                /Visit the ([^.]+) Store/i, // "Visit the Seller Name Store"
+                /by\s+([^.]+)/i // "by Seller Name"
+              ];
+              
+              for (const pattern of patterns) {
+                const match = text.match(pattern);
+                if (match && match[1]) {
+                  sellerName = match[1].trim();
+                  
+                  // 排除Amazon自己
+                  if (sellerName.toLowerCase().includes('amazon')) {
+                    console.log('文本提取排除Amazon自营卖家:', sellerName);
+                    sellerName = null;
+                    continue;
+                  }
+                  
+                  console.log(`从文本中提取到卖家名称: ${sellerName}`);
+                  
+                  // 尝试在同一个元素中找到链接
+                  const links = element.querySelectorAll('a');
+                  for (const link of links) {
+                    if (link.href && (link.href.includes('seller=') || link.textContent.trim() === sellerName)) {
+                      sellerUrl = link.href;
+                      
+                      // 如果链接不是绝对URL，转换为绝对URL
+                      if (sellerUrl && !sellerUrl.startsWith('http')) {
+                        // 处理相对URL
+                        const baseUrl = new URL(url).origin;
+                        sellerUrl = new URL(sellerUrl, baseUrl).href;
+                      }
+                      
+                      console.log(`找到匹配卖家名称的链接: ${sellerUrl}`);
+                      
+                      // 尝试从URL中提取sellerId
+                      const idMatch = sellerUrl.match(/seller=([A-Z0-9]+)/i);
+                      if (idMatch && idMatch[1]) {
+                        sellerId = idMatch[1];
+                        console.log(`从链接中提取卖家ID: ${sellerId}`);
+                      }
+                      
+                      break;
+                    }
+                  }
+                  
+                  break;
                 }
-                
-                console.log(`从文本中提取到卖家名称: ${sellerName}`);
-                break;
               }
+              
+              if (sellerName) break;
             }
-            
-            if (sellerName) break;
           }
+          
+          if (sellerName) break;
         } catch (error) {
           console.error(`使用选择器 "${selector}" 提取卖家文本时出错:`, error);
         }
@@ -963,145 +2107,31 @@ async function fetchSellerInfoFromProductPage(url) {
         /sellerId=([A-Z0-9]{10,16})/i
       ];
       
+      // 在整个HTML中搜索
       for (const regex of sellerIdRegexes) {
         const match = html.match(regex);
         if (match && match[1]) {
           sellerId = match[1];
-          sellerUrl = `https://www.amazon.com/sp?seller=${sellerId}`;
+          
+          // 构建卖家URL - 使用当前页面的域名构建
+          const currentUrl = new URL(url);
+          sellerUrl = `${currentUrl.origin}/sp?seller=${sellerId}`;
+          
           console.log(`构建卖家URL: ${sellerUrl}`);
           break;
         }
       }
     }
     
-    // 方法4: 如果找到卖家URL，尝试从卖家页面提取更多信息（如国家信息）
-    if (sellerUrl) {
-      console.log(`尝试从卖家页面(C页面)获取更多信息: ${sellerUrl}`);
-      
-      try {
-        // 获取卖家页面内容
-        const sellerResponse = await fetch(sellerUrl, {
-          method: 'GET',
-          credentials: 'same-origin',
-          headers: {
-            'Accept': 'text/html,application/xhtml+xml,application/xml',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'User-Agent': window.navigator.userAgent
-          }
-        });
-        
-        if (!sellerResponse.ok) {
-          console.error(`获取卖家页面失败: ${sellerResponse.status} ${sellerResponse.statusText}`);
-          // 虽然获取C页面失败，但已有A-B页面的信息，所以继续
-        } else {
-          const sellerHtml = await sellerResponse.text();
-          console.log(`成功获取到卖家页面HTML，长度: ${sellerHtml.length} 字符`);
-          
-          // 解析卖家页面HTML
-          const sellerDoc = parser.parseFromString(sellerHtml, 'text/html');
-          
-          // 提取卖家国家信息
-          const businessInfoSelectors = [
-            '.a-row:contains("Business Name"), .a-row:contains("Business Address")',
-            '.a-section:contains("Business Address")',
-            '.a-section:contains("located in")',
-            'h1 + div',
-            '#page-section-detail-seller-info',
-            '.seller-information',
-            '[class*="address"]',
-            '[class*="location"]'
-          ];
-          
-          let sellerCountry = null;
-          let sellerBusinessInfo = null;
-          
-          // 先直接查找中国关键词
-          if (sellerHtml.includes('China') || 
-              sellerHtml.includes('Beijing') || 
-              sellerHtml.includes('Shanghai') || 
-              sellerHtml.includes('Shenzhen') || 
-              sellerHtml.includes('Guangzhou') || 
-              sellerHtml.includes('Hangzhou')) {
-            
-            console.log('卖家页面包含中国地址关键词');
-            sellerCountry = 'China';
-          }
-          
-          // 如果没有直接找到，尝试查找特定元素
-          if (!sellerCountry) {
-            for (const selector of businessInfoSelectors) {
-              try {
-                const elements = sellerDoc.querySelectorAll(selector);
-                if (!elements || elements.length === 0) continue;
-                
-                for (const element of elements) {
-                  const text = element.textContent.trim();
-                  
-                  // 检查是否包含中国相关关键词
-                  const isChineseAddress = 
-                    text.includes('China') || 
-                    text.includes('Beijing') || 
-                    text.includes('Shanghai') || 
-                    text.includes('Shenzhen') || 
-                    text.includes('Guangzhou') || 
-                    text.includes('Hangzhou');
-                  
-                  if (isChineseAddress) {
-                    sellerCountry = 'China';
-                    sellerBusinessInfo = text;
-                    console.log(`卖家位于中国: ${text}`);
-                    break;
-                  }
-                  
-                  // 尝试从文本中提取国家信息
-                  const countryMatch = text.match(/(?:located|based|address|location)(?:\s+in)?(?:\s*:)?\s+([^,\.]+(?:,\s*[^,\.]+){0,2}?)(?:\.|\n|$)/i);
-                  if (countryMatch && countryMatch[1]) {
-                    sellerCountry = countryMatch[1].trim();
-                    sellerBusinessInfo = text;
-                    console.log(`找到卖家国家信息: ${sellerCountry}`);
-                    break;
-                  }
-                }
-                
-                if (sellerCountry) break;
-              } catch (error) {
-                console.error(`使用选择器 "${selector}" 提取卖家国家信息时出错:`, error);
-              }
-            }
-          }
-          
-          // 如果已经确定是中国卖家，直接返回结果
-          if (sellerCountry === 'China') {
-            return {
-              sellerName,
-              sellerId,
-              sellerUrl,
-              sellerCountry,
-              sellerBusinessInfo,
-              isConfirmedChinese: true
-            };
-          }
-          
-          // 保存国家信息以便返回
-          if (sellerCountry) {
-            return {
-              sellerName,
-              sellerId,
-              sellerUrl,
-              sellerCountry,
-              sellerBusinessInfo
-            };
-          }
-        }
-      } catch (error) {
-        console.error('获取卖家页面信息时出错:', error);
-        // 错误处理 - 继续使用已有信息
-      }
-    }
-    
     // 返回从B页面获取的信息
     if (sellerName) {
-      return { sellerName, sellerId, sellerUrl };
+      return { 
+        sellerName, 
+        sellerId, 
+        sellerUrl,
+        confidence: sellerId && sellerUrl ? 0.7 : 0.5, // 有ID和URL的置信度更高
+        isConfirmedChinese: false 
+      };
     }
     
     console.log('未能从产品页面获取卖家信息');
@@ -1117,802 +2147,494 @@ async function fetchSellerInfoFromProductPage(url) {
  * @returns {HTMLElement} 状态容器元素
  */
 function ensureScanStatusContainer() {
-  // 检查是否已存在扫描状态容器
-  let statusContainer = document.querySelector('.scan-status-container');
+  // 检查是否已存在
+  let container = document.getElementById('cn-seller-scan-status');
   
-  // 如果状态容器不存在，创建它
-  if (!statusContainer) {
-    // 查找添加位置 - 尝试多个可能的位置
-    const searchResults = document.querySelector('.s-result-list') || 
-                         document.querySelector('.s-search-results') || 
-                         document.getElementById('search-results') ||
-                         document.querySelector('.s-main-slot') ||
-                         document.querySelector('#search');
-    
-    if (!searchResults) {
-      console.error('无法找到搜索结果容器');
-      return null;
-    }
-    
-    // 创建状态容器
-    statusContainer = document.createElement('div');
-    statusContainer.id = 'scan-status-container';
-    statusContainer.className = 'scan-status-container';
-    statusContainer.innerHTML = `
-      <div id="scan-status-text" class="scan-status-text">准备扫描...</div>
-      <div class="scan-progress">
-        <div id="scan-progress-bar" class="cyberpunk-progress-bar" style="width: 0%;">
-          <div class="progress-glow"></div>
-        </div>
-      </div>
-    `;
-    
-    // 设置样式
-    statusContainer.style.display = 'block';
-    statusContainer.style.padding = '15px';
-    statusContainer.style.margin = '15px 0';
-    statusContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-    statusContainer.style.borderRadius = '8px';
-    statusContainer.style.border = '2px solid var(--highlight-color, #ff0055)';
-    statusContainer.style.boxShadow = '0 0 20px var(--highlight-color, #ff0055), inset 0 0 8px rgba(0, 0, 0, 0.9)';
-    statusContainer.style.transition = 'all 0.5s cubic-bezier(0.19, 1, 0.22, 1)';
-    statusContainer.style.zIndex = '1000';
-    statusContainer.style.color = '#fff';
-    statusContainer.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
-    statusContainer.style.textShadow = '0 0 5px var(--highlight-color, #ff0055)';
-    
-    // 进度条样式
-    const progressBar = statusContainer.querySelector('.cyberpunk-progress-bar');
-    if (progressBar) {
-      progressBar.style.height = '20px';
-      progressBar.style.backgroundColor = 'rgba(255, 0, 85, 0.3)';
-      progressBar.style.borderRadius = '4px';
-      progressBar.style.position = 'relative';
-      progressBar.style.overflow = 'hidden';
-      progressBar.style.transition = 'width 0.5s ease';
-    }
-    
-    const progressGlow = statusContainer.querySelector('.progress-glow');
-    if (progressGlow) {
-      progressGlow.style.position = 'absolute';
-      progressGlow.style.top = '0';
-      progressGlow.style.left = '0';
-      progressGlow.style.height = '100%';
-      progressGlow.style.width = '5px';
-      progressGlow.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
-      progressGlow.style.boxShadow = '0 0 10px 5px rgba(255, 255, 255, 0.5)';
-      progressGlow.style.animation = 'progress-glow 2s ease-in-out infinite';
-    }
-    
-    // 添加动画样式
-    if (!document.getElementById('scan-status-styles')) {
-      const styleEl = document.createElement('style');
-      styleEl.id = 'scan-status-styles';
-      styleEl.textContent = `
-        @keyframes progress-glow {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(1000%); }
-        }
-        .cyberpunk-progress-bar.scanning {
-          background-image: linear-gradient(45deg, 
-            rgba(255, 0, 85, 0.3) 25%, 
-            rgba(255, 0, 85, 0.5) 25%, 
-            rgba(255, 0, 85, 0.5) 50%, 
-            rgba(255, 0, 85, 0.3) 50%, 
-            rgba(255, 0, 85, 0.3) 75%, 
-            rgba(255, 0, 85, 0.5) 75%, 
-            rgba(255, 0, 85, 0.5));
-          background-size: 20px 20px;
-          animation: progress-stripe 1s linear infinite;
-        }
-        @keyframes progress-stripe {
-          0% { background-position: 0 0; }
-          100% { background-position: 20px 20px; }
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
-    
-    // 插入到搜索结果前面
-    try {
-      searchResults.parentNode.insertBefore(statusContainer, searchResults);
-      console.log('创建了扫描状态容器');
-    } catch (error) {
-      console.error('插入扫描状态容器时出错:', error);
-      return null;
-    }
+  if (container) {
+    // 如果存在，仅返回而不立即显示
+    return container;
   }
   
-  return statusContainer;
+  // 创建容器
+  container = document.createElement('div');
+  container.id = 'cn-seller-scan-status';
+  container.style.cssText = `
+    position: fixed;
+    top: 70px;
+    left: 0;
+    right: 0;
+    width: 80%;
+    max-width: 1200px;
+    min-width: 800px;
+    margin: 0 auto;
+    padding: 15px 20px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    transition: all 0.3s ease;
+    display: none;
+    opacity: 0;
+    transform: translateY(-10px);
+    max-height: 85vh;
+    overflow-y: auto;
+  `;
+  
+  // 内容容器
+  const contentDiv = document.createElement('div');
+  contentDiv.style.cssText = `
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  `;
+  
+  // 标题部分
+  const titleDiv = document.createElement('div');
+  titleDiv.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+  `;
+  
+  // 标题
+  const title = document.createElement('h3');
+  title.textContent = '中国卖家扫描';
+  title.style.cssText = `
+    margin: 0;
+    color: #ff0055;
+    font-size: 18px;
+    font-weight: bold;
+  `;
+  
+  titleDiv.appendChild(title);
+  
+  // 添加关闭按钮
+  const closeButton = document.createElement('button');
+  closeButton.textContent = '×';
+  closeButton.style.cssText = `
+    background: none;
+    border: none;
+    color: #ff0055;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  `;
+  
+  // 添加鼠标悬停效果
+  closeButton.onmouseover = function() {
+    this.style.backgroundColor = 'rgba(255, 0, 85, 0.1)';
+  };
+  
+  closeButton.onmouseout = function() {
+    this.style.backgroundColor = 'transparent';
+  };
+  
+  // 添加点击关闭功能
+  closeButton.onclick = function() {
+    container.style.opacity = '0';
+    container.style.transform = 'translateY(-10px)';
+    setTimeout(() => {
+      container.style.display = 'none';
+    }, 300);
+  };
+  
+  titleDiv.appendChild(closeButton);
+  contentDiv.appendChild(titleDiv);
+  
+  // 状态详情部分
+  const statusDiv = document.createElement('div');
+  statusDiv.className = 'scan-status-details';
+  statusDiv.style.cssText = `
+    padding: 15px;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.02);
+    margin-bottom: 15px;
+  `;
+  contentDiv.appendChild(statusDiv);
+  
+  // 统计部分
+  const statsDiv = document.createElement('div');
+  statsDiv.className = 'scan-stats-section';
+  statsDiv.style.cssText = `
+    padding: 15px;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.02);
+    margin-bottom: 15px;
+  `;
+  contentDiv.appendChild(statsDiv);
+  
+  // 中国卖家列表部分
+  const sellerListSection = document.createElement('div');
+  sellerListSection.className = 'cn-seller-list-section';
+  sellerListSection.style.cssText = `
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 0 15px;
+    margin-bottom: 15px;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.02);
+  `;
+  contentDiv.appendChild(sellerListSection);
+  
+  // 操作按钮部分
+  const actionDiv = document.createElement('div');
+  actionDiv.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+  `;
+  
+  // 创建刷新按钮
+  const refreshButton = document.createElement('button');
+  refreshButton.textContent = '重新扫描';
+  refreshButton.style.cssText = `
+    background-color: #ff0055;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 8px 20px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s ease;
+    font-size: 14px;
+  `;
+  
+  refreshButton.onmouseover = function() {
+    this.style.backgroundColor = '#e00046';
+  };
+  
+  refreshButton.onmouseout = function() {
+    this.style.backgroundColor = '#ff0055';
+  };
+  
+  refreshButton.onclick = function() {
+    console.log('用户点击重新扫描');
+    // 显示扫描状态容器
+    container.style.display = 'block';
+    setTimeout(() => {
+      container.style.opacity = '1';
+      container.style.transform = 'translateY(0)';
+    }, 10);
+    
+    removeAllMarks();
+    processSearchPage();
+  };
+  
+  actionDiv.appendChild(refreshButton);
+  contentDiv.appendChild(actionDiv);
+  
+  // 添加到页面
+  container.appendChild(contentDiv);
+  document.body.appendChild(container);
+  
+  return container;
 }
 
 /**
  * 更新扫描状态显示
- * @param {boolean} isActive - 扫描是否仍在活动状态
- * @param {number} current - 当前处理的产品数量
- * @param {number} total - 总产品数量
- * @param {string} message - 要显示的状态消息
- * @param {boolean} isRefreshing - 是否为刷新扫描状态
- * @param {number} progressPercent - 进度百分比，可选
+ * @param {boolean} isActive - 是否正在扫描中
+ * @param {number} current - 当前项目
+ * @param {number} total - 总数量
+ * @param {string} message - 状态信息
+ * @param {boolean} isRefreshing - 是否为刷新扫描
+ * @param {number} progressPercent - 进度百分比
  */
 function updateScanStatus(isActive, current, total, message, isRefreshing = false, progressPercent) {
-  const container = ensureScanStatusContainer();
-  if (!container) {
-    console.error('无法更新扫描状态 - 容器不存在');
+  const statusContainer = document.getElementById('cn-seller-scan-status');
+  if (!statusContainer) return;
+  
+  // 记录更新的状态
+  console.log(`更新扫描状态: 活跃=${isActive}, 当前=${current}, 总数=${total}, 消息="${message}"`);
+  
+  // 确保容器可见
+  if (statusContainer.style.display === 'none') {
+    statusContainer.style.display = 'block';
+    setTimeout(() => {
+      statusContainer.style.opacity = '1';
+      statusContainer.style.transform = 'translateY(0)';
+    }, 10);
+  }
+  
+  // 找到状态显示部分
+  const statusDiv = statusContainer.querySelector('.scan-status-details');
+  if (!statusDiv) return;
+  
+  // 清除旧内容
+  statusDiv.innerHTML = '';
+  
+  // 创建状态指示器
+  const statusIndicator = document.createElement('div');
+  statusIndicator.className = 'scan-status-indicator';
+  statusIndicator.style.display = 'flex';
+  statusIndicator.style.alignItems = 'center';
+  statusIndicator.style.marginBottom = '10px';
+  statusIndicator.style.padding = '10px';
+  statusIndicator.style.borderRadius = '6px';
+  statusIndicator.style.backgroundColor = isActive ? 'rgba(255, 0, 85, 0.1)' : 'rgba(153, 153, 153, 0.1)';
+  
+  // 创建状态图标
+  const statusIcon = document.createElement('div');
+  statusIcon.style.cssText = `
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    margin-right: 12px;
+    background-color: ${isActive ? '#ff0055' : '#999'};
+    ${isActive ? 'animation: pulse 1.5s infinite ease-in-out;' : ''}
+  `;
+  
+  // 添加脉动动画
+  if (isActive) {
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes pulse {
+        0% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.6; transform: scale(1.1); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  statusIndicator.appendChild(statusIcon);
+  
+  // 创建状态文本
+  const statusText = document.createElement('div');
+  statusText.style.cssText = `
+    font-size: 14px;
+    font-weight: bold;
+    color: ${isActive ? '#ff0055' : '#666'};
+  `;
+  statusText.textContent = isActive ? '正在扫描中...' : '扫描已完成';
+  statusIndicator.appendChild(statusText);
+  
+  statusDiv.appendChild(statusIndicator);
+  
+  // 创建进度条
+  if (isActive && total > 0) {
+    const progressContainer = document.createElement('div');
+    progressContainer.style.cssText = `
+      width: 100%;
+      height: 8px;
+      background-color: #f0f0f0;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 15px 0;
+    `;
+    
+    const progressBar = document.createElement('div');
+    const percent = progressPercent !== undefined ? progressPercent : Math.round((current / total) * 100);
+    progressBar.style.cssText = `
+      width: ${percent}%;
+      height: 100%;
+      background-color: #ff0055;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    `;
+    
+    progressContainer.appendChild(progressBar);
+    statusDiv.appendChild(progressContainer);
+    
+    // 进度文本
+    const progressText = document.createElement('div');
+    progressText.style.cssText = `
+      text-align: center;
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 10px;
+    `;
+    progressText.textContent = `进度: ${current} / ${total} (${percent}%)`;
+    statusDiv.appendChild(progressText);
+  }
+  
+  // 添加状态消息
+  if (message) {
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = `
+      margin-top: 10px;
+      padding: 10px;
+      background-color: ${isActive ? 'rgba(255, 0, 85, 0.05)' : 'rgba(0, 0, 0, 0.05)'};
+      border-radius: 4px;
+      font-size: 13px;
+      color: #333;
+    `;
+    messageDiv.textContent = message;
+    statusDiv.appendChild(messageDiv);
+  }
+}
+
+/**
+ * 更新扫描统计信息
+ * @param {Object} stats - 统计数据对象
+ */
+function updateScanStats(stats) {
+  const statusContainer = document.getElementById('cn-seller-scan-status');
+  if (!statusContainer) return;
+  
+  const statsDiv = statusContainer.querySelector('.scan-stats-section');
+  if (!statsDiv) return;
+  
+  // 清除旧内容
+  statsDiv.innerHTML = '';
+  
+  // 创建标题
+  const statsTitle = document.createElement('h4');
+  statsTitle.textContent = '扫描统计';
+  statsTitle.style.cssText = `
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 16px;
+    font-weight: bold;
+  `;
+  statsDiv.appendChild(statsTitle);
+  
+  // 创建统计网格
+  const statsGrid = document.createElement('div');
+  statsGrid.style.cssText = `
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+  `;
+  
+  // 添加统计项
+  const addStatItem = (label, value, color = '#333', icon = null) => {
+    const item = document.createElement('div');
+    item.style.cssText = `
+      padding: 12px;
+      background-color: rgba(0, 0, 0, 0.03);
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+    `;
+    
+    const valueEl = document.createElement('div');
+    valueEl.style.cssText = `
+      font-size: 20px;
+      font-weight: bold;
+      color: ${color};
+      margin-bottom: 5px;
+    `;
+    valueEl.textContent = value;
+    
+    const labelEl = document.createElement('div');
+    labelEl.style.cssText = `
+      font-size: 12px;
+      color: #666;
+    `;
+    labelEl.textContent = label;
+    
+    item.appendChild(valueEl);
+    item.appendChild(labelEl);
+    
+    return item;
+  };
+  
+  // 添加各项统计
+  statsGrid.appendChild(addStatItem('总产品数', stats.totalProducts || 0));
+  statsGrid.appendChild(addStatItem('中国卖家数', stats.cnSellers || 0, '#ff0055'));
+  statsGrid.appendChild(addStatItem('中国卖家比例', `${stats.cnSellerPercentage || 0}%`, '#ff0055'));
+  statsGrid.appendChild(addStatItem('扫描耗时', `${stats.scanTime || 0}秒`));
+  
+  statsDiv.appendChild(statsGrid);
+  
+  // 更新卖家列表
+  updateSellerList(stats.sellerList || []);
+}
+
+/**
+ * 更新卖家列表显示
+ * @param {Array} sellerList - 卖家列表数组
+ */
+function updateSellerList(sellerList) {
+  const statusContainer = document.getElementById('cn-seller-scan-status');
+  if (!statusContainer) return;
+  
+  const sellerListSection = statusContainer.querySelector('.cn-seller-list-section');
+  if (!sellerListSection) return;
+  
+  // 清除旧内容
+  sellerListSection.innerHTML = '';
+  
+  // 创建标题
+  const listTitle = document.createElement('h4');
+  listTitle.textContent = '已识别中国卖家';
+  listTitle.style.cssText = `
+    margin: 15px 0;
+    color: #333;
+    font-size: 16px;
+    font-weight: bold;
+  `;
+  sellerListSection.appendChild(listTitle);
+  
+  // 如果没有卖家
+  if (!sellerList || sellerList.length === 0) {
+    const emptyMessage = document.createElement('div');
+    emptyMessage.style.cssText = `
+      padding: 15px;
+      text-align: center;
+      color: #666;
+      font-style: italic;
+    `;
+    emptyMessage.textContent = '暂未识别到中国卖家';
+    sellerListSection.appendChild(emptyMessage);
     return;
   }
   
-  // 计算进度百分比（如果未提供）
-  if (progressPercent === undefined && total > 0) {
-    progressPercent = Math.round((current / total) * 100);
-  } else if (progressPercent === undefined) {
-    progressPercent = 0;
-  }
+  // 创建卖家列表
+  const sellerListEl = document.createElement('ul');
+  sellerListEl.style.cssText = `
+    list-style: none;
+    padding: 0;
+    margin: 0 0 15px 0;
+  `;
   
-  // 更新进度条
-  const progressBar = container.querySelector('.progress-bar');
-  if (progressBar) {
-    progressBar.style.width = `${progressPercent}%`;
+  // 添加卖家项
+  sellerList.forEach((seller, index) => {
+    const sellerItem = document.createElement('li');
+    sellerItem.style.cssText = `
+      padding: 10px 15px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      ${index % 2 === 0 ? 'background-color: rgba(0, 0, 0, 0.01);' : ''}
+    `;
     
-    // 基于进度更新颜色
-    if (progressPercent <= 30) {
-      progressBar.style.backgroundColor = '#ff0055'; // 红色
-    } else if (progressPercent <= 70) {
-      progressBar.style.backgroundColor = '#ffcc00'; // 黄色
-    } else {
-      progressBar.style.backgroundColor = '#00ff66'; // 绿色
-    }
-  }
-  
-  // 更新进度文本
-  const progressText = container.querySelector('.progress-text');
-  if (progressText) {
-    if (total > 0) {
-      progressText.textContent = `${current}/${total} (${progressPercent}%)`;
-    } else {
-      progressText.textContent = '';
-    }
-  }
-  
-  // 更新状态文本
-  const statusText = container.querySelector('.status-text');
-  if (statusText) {
-    statusText.textContent = message;
+    const sellerName = document.createElement('div');
+    sellerName.style.cssText = `
+      font-weight: ${seller.confidence > 0.8 ? 'bold' : 'normal'};
+      color: ${seller.confidence > 0.8 ? '#ff0055' : '#333'};
+    `;
+    sellerName.textContent = seller.name || '未知卖家';
     
-    // 根据状态设置不同颜色
-    if (isActive) {
-      statusText.style.color = '#00f3ff'; // 活动时为青色
-    } else if (message.includes('错误') || message.includes('失败')) {
-      statusText.style.color = '#ff0055'; // 错误时为红色
-    } else if (message.includes('完成')) {
-      statusText.style.color = '#00ff66'; // 完成时为绿色
-    } else {
-      statusText.style.color = '#fff'; // 默认为白色
-    }
+    const sellerConfidence = document.createElement('div');
+    sellerConfidence.style.cssText = `
+      font-size: 12px;
+      color: #666;
+      background-color: rgba(255, 0, 85, ${seller.confidence || 0});
+      padding: 2px 8px;
+      border-radius: 10px;
+      color: white;
+    `;
+    sellerConfidence.textContent = `${Math.round((seller.confidence || 0) * 100)}%`;
     
-    // 如果是刷新扫描，添加特殊标记
-    if (isRefreshing) {
-      statusText.textContent = '🔄 ' + message;
-      statusText.style.animation = 'status-pulse 1s infinite';
-    } else {
-      statusText.style.animation = '';
-    }
-  }
-  
-  // 更新活动状态指示器
-  const activeIndicator = container.querySelector('.scanner-active-indicator');
-  if (activeIndicator) {
-    activeIndicator.style.backgroundColor = isActive ? '#00ff66' : '#888';
-    activeIndicator.style.boxShadow = isActive ? '0 0 10px #00ff66' : 'none';
-    activeIndicator.style.animation = isActive ? 'pulse 1.5s infinite' : 'none';
-  }
-  
-  // 更新控制按钮状态
-  const refreshButton = container.querySelector('.refresh-scan-button');
-  if (refreshButton) {
-    refreshButton.disabled = isActive;
-    refreshButton.style.opacity = isActive ? '0.5' : '1';
-    refreshButton.style.cursor = isActive ? 'not-allowed' : 'pointer';
-  }
-  
-  // 确保容器可见
-  container.style.display = 'block';
-  
-  // 添加键盘控制 - ESC键停止扫描
-  if (isActive && !window.escKeyListenerAdded) {
-    window.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && isScanning) {
-        console.log('检测到ESC键，停止扫描');
-        isScanning = false;
-        updateScanStatus(false, current, total, '扫描已手动停止 (ESC)');
-      }
-    });
-    window.escKeyListenerAdded = true;
-  }
-}
-
-/**
- * 获取所有产品卡片
- * @returns {Array} 产品卡片元素数组
- */
-function getProductCards() {
-  console.log('开始寻找产品卡片...');
-  console.log('当前URL:', window.location.href);
-  console.log('当前页面类型:', currentPageType);
-  
-  // 尝试不同的产品卡片选择器，以适应Amazon页面的不同布局
-  let productCards = [];
-  
-  // 搜索结果页面
-  if (currentPageType === 'search') {
-    console.log('识别为搜索结果页面，尝试查找产品卡片');
-    
-    // 创建更全面的选择器列表
-    const selectors = [
-      // 原有选择器
-      '.s-result-item[data-asin]:not([data-asin=""])',
-      '.sg-col-4-of-12.s-result-item',
-      '.sg-col-4-of-16.s-result-item',
-      '[data-component-type="s-search-result"]',
-      '.s-asin',
-      '.s-result-list .a-section.a-spacing-medium',
-      'div.s-result-list div.s-result-item',
-      
-      // 新增更全面的选择器
-      'div[data-asin]:not([data-asin=""]):not(.AdHolder)',
-      '.s-result-item:not(.AdHolder)',
-      '[cel_widget_id*="MAIN-SEARCH_RESULTS"]',
-      '.s-card-container',
-      '.s-result',
-      '.sg-col-4-of-24',
-      '.sg-col-4-of-20',
-      '.a-spacing-base:not(.a-spacing-top-base)',
-      '.a-cardui',
-      'div[data-cel-widget*="search_result"]',
-      '[data-component-id*="s-search-result"]',
-      'div[data-uuid]',
-      'div[data-index]',
-      
-      // 2023-2024更新的选择器
-      '[data-component-id]',
-      '.puis-card-container',
-      '.s-desktop-width-max .s-desktop-content .s-matching-dir .sg-col-16-of-20 .sg-col-0-of-12 .sg-col .sg-col-12-of-16 .sg-col-0-of-20 .s-list-col-right',
-      '[data-csa-c-type="item"]',
-      '[data-csa-c-item-id]',
-      '.a-section.a-spacing-base',
-      '.puis-list-col-right',
-      '.s-include-content-margin',
-      '.s-latency-cf-section',
-      '.widgetId\=search-results_*',
-      'div[data-csa-c-slot-id]',
-      'span[data-component-type="s-product-image"]',
-      'div[class*="s-product-image-container"]',
-      'div.rush-component.s-featured-result-item'
-    ];
-    
-    console.log(`将尝试 ${selectors.length} 个不同的选择器`);
-    
-    // 尝试每个选择器
-    for (const selector of selectors) {
-      try {
-        const items = document.querySelectorAll(selector);
-        if (items && items.length > 0) {
-          console.log(`使用选择器 "${selector}" 找到 ${items.length} 个产品卡片`);
-          productCards = Array.from(items);
-          break;
-        }
-      } catch (error) {
-        console.error(`使用选择器 "${selector}" 时出错:`, error);
-      }
-    }
-    
-    // 如果上面的选择器都没找到产品，尝试查找包含价格和评分的元素作为备用
-    if (productCards.length === 0) {
-      console.log('使用备用产品检测方法 - 查找价格和评分元素');
-      
-      // 更全面的备用检测元素
-      const priceElements = document.querySelectorAll('.a-price, .a-offscreen, .a-price-whole, span[aria-hidden="true"][class*="price"], .a-price-fraction');
-      const ratingElements = document.querySelectorAll('.a-star-rating, .a-icon-star, .a-icon-star-small, i[class*="star"], .a-size-small.a-link-normal');
-      const titleElements = document.querySelectorAll('h2 a, h5 a, .a-size-base-plus, .a-size-medium, a.a-link-normal[href*="/dp/"], .a-link-normal .a-text-normal, .a-color-base.a-text-normal');
-      const linkElements = document.querySelectorAll('a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/gp/slredirect/"]');
-      const imageElements = document.querySelectorAll('img[data-image-index], img.s-image, .s-product-image-container img, .aok-relative img');
-      
-      console.log('备用检测找到的元素数量:');
-      console.log(`价格元素: ${priceElements.length}`);
-      console.log(`评分元素: ${ratingElements.length}`);
-      console.log(`标题元素: ${titleElements.length}`);
-      console.log(`链接元素: ${linkElements.length}`);
-      console.log(`图片元素: ${imageElements.length}`);
-      
-      // 2. 收集所有可能的产品元素
-      const potentialProductElements = new Set();
-      
-      // 处理函数 - 向上查找可能的产品容器
-      const findPotentialProduct = (element) => {
-        if (!element) return null;
-        let current = element;
-        for (let i = 0; i < 10; i++) { // 向上查找最多10层
-          if (!current.parentElement) break;
-          current = current.parentElement;
-          
-          // 检查是否可能是产品卡片的特征
-          if (current.tagName === 'DIV' || current.tagName === 'LI') {
-            // 检查一些可能表明这是产品卡片的特征
-            if (current.hasAttribute('data-asin') || 
-                current.hasAttribute('data-uuid') || 
-                current.hasAttribute('data-index') ||
-                current.hasAttribute('data-component-type') ||
-                current.hasAttribute('data-component-id') ||
-                current.hasAttribute('data-csa-c-item-id') ||
-                current.hasAttribute('data-csa-c-type') ||
-                current.className.includes('s-result') ||
-                current.className.includes('card') ||
-                current.className.includes('sg-col') ||
-                current.className.includes('puis') ||
-                current.style.position === 'relative') {
-              return current;
-            }
-          }
-        }
-        return null;
-      };
-      
-      // 收集可能的产品元素
-      const collectFromElements = (elements) => {
-        elements.forEach(el => {
-          const product = findPotentialProduct(el);
-          if (product) potentialProductElements.add(product);
-        });
-      };
-      
-      // 从各种元素收集可能的产品卡片
-      collectFromElements(priceElements);
-      collectFromElements(ratingElements);
-      collectFromElements(titleElements);
-      collectFromElements(linkElements);
-      collectFromElements(imageElements);
-      
-      if (potentialProductElements.size > 0) {
-        console.log(`使用备用方法找到 ${potentialProductElements.size} 个可能的产品卡片`);
-        productCards = Array.from(potentialProductElements);
-      } else {
-        console.log('备用方法也未找到产品卡片');
-      }
-    }
-    
-    // 如果仍未找到产品卡片，使用最激进的方法 - 查找任何可能包含产品的区域
-    if (productCards.length === 0) {
-      console.log('使用最后的备用方法 - 查找任何可能的产品区域');
-      
-      // 查找主要内容区域
-      const mainContent = document.getElementById('search') || 
-                         document.querySelector('.s-main-slot') || 
-                         document.querySelector('.s-search-results') ||
-                         document.querySelector('main') ||
-                         document.querySelector('.sg-col-20-of-24') ||
-                         document.querySelector('[data-cel-widget="search_results"]') ||
-                         document.querySelector('#search-results') ||
-                         document.querySelector('.s-matching-dir');
-      
-      if (mainContent) {
-        console.log('找到主要内容区域:', mainContent);
-        // 先尝试寻找可能包含价格的元素
-        const allPriceElements = mainContent.querySelectorAll('.a-price, .a-offscreen, .a-price-whole');
-        console.log(`主内容区域内找到 ${allPriceElements.length} 个价格元素`);
-        
-        // 查找主要内容区域的直接子元素
-        const directChildren = mainContent.children;
-        if (directChildren && directChildren.length > 0) {
-          console.log(`主内容区域直接子元素数量: ${directChildren.length}`);
-          productCards = Array.from(directChildren).filter(child => {
-            // 过滤掉明显不是产品的元素
-            return child.tagName === 'DIV' && !child.id.includes('pagination') && 
-                   !child.className.includes('a-section-footer') &&
-                   !child.className.includes('pagination');
-          });
-          console.log(`从主要内容区域找到 ${productCards.length} 个可能的产品区域`);
-        }
-      } else {
-        console.log('未找到主要内容区域，尝试直接获取所有可能的产品区域');
-        // 如果找不到主要区域，尝试直接获取所有包含价格的父元素
-        const allPriceElementsPage = document.querySelectorAll('.a-price, .a-offscreen, .a-price-whole');
-        
-        if (allPriceElementsPage.length > 0) {
-          const potentialProducts = new Set();
-          allPriceElementsPage.forEach(priceEl => {
-            let current = priceEl;
-            for (let i = 0; i < 5; i++) {
-              if (!current.parentElement) break;
-              current = current.parentElement;
-              if (current.tagName === 'DIV' && 
-                  (current.className.includes('a-section') || current.className.includes('s-'))) {
-                potentialProducts.add(current);
-                break;
-              }
-            }
-          });
-          
-          if (potentialProducts.size > 0) {
-            productCards = Array.from(potentialProducts);
-            console.log(`通过价格元素发现 ${productCards.length} 个潜在产品区域`);
-          }
-        }
-      }
-    }
-  }
-  // 产品页面处理逻辑保持不变
-  else if (currentPageType === 'product') {
-    // 产品页面通常只有一个主产品
-    const mainProduct = document.getElementById('dp') || document.getElementById('ppd');
-    if (mainProduct) {
-      productCards = [mainProduct];
-    }
-    
-    // 也检查"买这个也买那个"和"相关产品"部分
-    const relatedSelectors = [
-      '#sims-consolidated-1_feature_div .a-carousel-card',
-      '#sims-consolidated-2_feature_div .a-carousel-card',
-      '#purchase-sims-feature .a-carousel-card',
-      '.sims-fbt-rows .sims-fbt-image-box',
-      // 更多可能的相关产品选择器
-      '.a-carousel-card',
-      '[data-a-carousel-options]'
-    ];
-    
-    // 查找相关产品
-    for (const selector of relatedSelectors) {
-      const related = document.querySelectorAll(selector);
-      if (related && related.length > 0) {
-        productCards = [...productCards, ...Array.from(related)];
-      }
-    }
-  }
-  
-  // 检查是否有任何商品具有hidden属性并排除它们（可能是筛选器隐藏的）
-  const visibleCards = productCards.filter(card => {
-    if (!card) return false;
-    
-    try {
-      const style = window.getComputedStyle(card);
-      return style.display !== 'none' && 
-             style.visibility !== 'hidden' && 
-             style.opacity !== '0' &&
-             card.offsetParent !== null; // 检查元素是否实际可见
-    } catch (error) {
-      console.error('检查卡片可见性时出错:', error);
-      return true; // 出错时默认认为可见
-    }
+    sellerItem.appendChild(sellerName);
+    sellerItem.appendChild(sellerConfidence);
+    sellerListEl.appendChild(sellerItem);
   });
   
-  console.log(`最终找到 ${visibleCards.length} 个可见的产品卡片（总共 ${productCards.length} 个）`);
-  
-  // 如果没有找到卡片，输出页面结构以便调试
-  if (visibleCards.length === 0) {
-    console.log('未找到产品卡片，输出页面结构以便调试:');
-    console.log('Body子元素数量:', document.body.children.length);
-    console.log('主要内容区域:');
-    console.log('- search元素存在:', !!document.getElementById('search'));
-    console.log('- s-main-slot元素存在:', !!document.querySelector('.s-main-slot'));
-    console.log('- s-search-results元素存在:', !!document.querySelector('.s-search-results'));
-    console.log('- sg-col-20-of-24元素存在:', !!document.querySelector('.sg-col-20-of-24'));
-    console.log('- data-cel-widget=search_results元素存在:', !!document.querySelector('[data-cel-widget="search_results"]'));
-  }
-  
-  return visibleCards;
-}
-
-/**
- * 处理单个产品卡片
- * @param {Element} card - 产品卡片元素
- * @returns {Promise<Object>} 处理结果，包含卖家信息
- */
-async function processProductCard(card) {
-  try {
-    // 检查卡片是否有效
-    if (!card) {
-      console.log('卡片为空，无法处理');
-      return null;
-    }
-    
-    // 检查卡片是否已经被处理过
-    if (card.hasAttribute('data-seller-processed')) {
-      console.log('卡片已被处理，跳过');
-      const sellerType = card.getAttribute('data-seller-type');
-      return { isAlreadyProcessed: true, isChineseSeller: sellerType === 'chinese' };
-    }
-    
-    // 添加处理标记
-    card.setAttribute('data-seller-processed', 'true');
-    
-    // 获取产品ASIN（Amazon标准识别号）
-    let asin = card.getAttribute('data-asin');
-    console.log('初始ASIN检查:', asin);
-    
-    // 如果没有直接获取到ASIN，尝试从各种位置提取
-    if (!asin || asin === '') {
-      console.log('未在data-asin属性中找到ASIN，尝试其他方法');
-      
-      // 1. 从URL提取ASIN - 检查多种链接模式
-      const linkSelectors = [
-        'a[href*="/dp/"]', 
-        'a[href*="/gp/product/"]',
-        'a[href*="/gp/slredirect/"]',
-        'a[href*="product-reviews"]',
-        'a[href*="offer-listing"]',
-        'a[href*="dealID="]',
-        '.a-link-normal',
-        'a[data-routing]'
-      ];
-      
-      // 合并所有选择器，一次性查询
-      const allLinkSelector = linkSelectors.join(', ');
-      const links = card.querySelectorAll(allLinkSelector);
-      
-      if (links.length > 0) {
-        console.log(`找到 ${links.length} 个可能包含ASIN的链接`);
-        
-        for (const link of links) {
-          const href = link.getAttribute('href');
-          if (!href) continue;
-          
-          // 尝试多种正则表达式匹配模式
-          const patterns = [
-            /\/(?:dp|gp\/product|gp\/slredirect)\/([A-Z0-9]{10})(?:\/|\?|$)/,
-            /(?:product-reviews|offer-listing)\/([A-Z0-9]{10})(?:\/|\?|$)/,
-            /(?:\/|%2F)([A-Z0-9]{10})(?:\/|%2F|\?|$)/,
-            /asin(?:=|%3D)([A-Z0-9]{10})(?:&|$)/,
-            /\/images\/I\/([A-Z0-9]{10})(?:[A-Z0-9]|\.|$)/
-          ];
-          
-          for (const pattern of patterns) {
-            const match = href.match(pattern);
-            if (match && match[1]) {
-              asin = match[1];
-              console.log(`从链接提取到ASIN: ${asin}`);
-              break;
-            }
-          }
-          
-          if (asin) break; // 如果找到ASIN，结束循环
-        }
-      }
-      
-      // 2. 如果仍未找到，尝试从各种属性中提取
-      if (!asin) {
-        const possibleAttributes = [
-          'data-asin', 'data-cel-widget', 'data-csa-c-item-id', 
-          'id', 'data-uuid', 'data-id', 'data-component-id'
-        ];
-        
-        for (const attrName of possibleAttributes) {
-          // 检查卡片本身
-          if (card.hasAttribute(attrName)) {
-            const attrValue = card.getAttribute(attrName);
-            const match = attrValue.match(/([A-Z0-9]{10})/);
-            if (match && match[1]) {
-              asin = match[1];
-              console.log(`从${attrName}属性提取到ASIN: ${asin}`);
-              break;
-            }
-          }
-          
-          // 检查卡片子元素
-          const elementsWithAttr = card.querySelectorAll(`[${attrName}]`);
-          for (const element of elementsWithAttr) {
-            const attrValue = element.getAttribute(attrName);
-            const match = attrValue.match(/([A-Z0-9]{10})/);
-            if (match && match[1]) {
-              asin = match[1];
-              console.log(`从子元素的${attrName}属性提取到ASIN: ${asin}`);
-              break;
-            }
-          }
-          
-          if (asin) break;
-        }
-      }
-      
-      // 3. 最后尝试从图片URL中提取
-      if (!asin) {
-        const images = card.querySelectorAll('img');
-        for (const img of images) {
-          if (img.src) {
-            const match = img.src.match(/\/images\/I\/([A-Z0-9]{10})/);
-            if (match && match[1]) {
-              asin = match[1];
-              console.log(`从图片URL提取到ASIN: ${asin}`);
-              break;
-            }
-          }
-        }
-      }
-    }
-    
-    // 如果最终仍未找到ASIN
-    if (!asin) {
-      console.log('无法提取ASIN，标记为未知卖家');
-      card.setAttribute('data-seller-type', 'unknown');
-      return { isChineseSeller: false, isUnknown: true };
-    }
-    
-    console.log(`处理产品卡片，ASIN: ${asin}`);
-    
-    // 从卡片中查找卖家信息
-    let sellerName = '';
-    let sellerUrl = '';
-    
-    // 更全面的卖家信息选择器
-    const sellerSelectors = [
-      // 基本卖家信息选择器
-      '.a-row.a-size-base a:not([href*="field-lbr_brands"])',
-      '[data-cy="seller-name"] a',
-      '.a-size-base.a-link-normal:not([href*="field-lbr_brands"])',
-      '.a-size-small.a-color-secondary',
-      '.a-size-small:not(.a-color-price)',
-      '.puis-seller-name-with-icon .a-row',
-      
-      // 包含"by"或"from"的元素
-      '*:contains("by ")',
-      '*:contains("from ")',
-      '*:contains("Brand: ")',
-      '*:contains("Visit the ")',
-      '*:contains("Sponsored by ")',
-      
-      // 更多可能的选择器
-      '.a-row:not(.a-spacing-top-small)',
-      '.a-row.a-size-small',
-      '.a-row a[href*="/s?i=merchant-items"]',
-      '.a-row a[href*="/shops/"]',
-      'a[href*="/s?marketplaceID="]',
-      'a[href*="seller="]',
-      'span.rush-component'
-    ];
-    
-    // 尝试每个选择器
-    for (const selector of sellerSelectors) {
-      try {
-        const elements = card.querySelectorAll(selector);
-        
-        for (const element of elements) {
-          let text = element.textContent.trim();
-          
-          // 1. 检查是否包含"by"或"from"关键词
-          const byMatch = text.match(/(?:by|from|sold by|Brand:)\s+([^|.]+)/i);
-          if (byMatch) {
-            sellerName = byMatch[1].trim();
-            console.log(`找到卖家名称（通过标准模式）: ${sellerName}`);
-            
-            // 查找链接
-            const links = element.querySelectorAll('a');
-            for (const link of links) {
-              const href = link.getAttribute('href');
-              if (href && (href.includes('/s?i=merchant-items') || 
-                          href.includes('/shops/') || 
-                          href.includes('seller=') || 
-                          href.includes('marketplaceID'))) {
-                sellerUrl = href;
-                console.log(`找到卖家链接: ${sellerUrl}`);
-                break;
-              }
-            }
-            
-            if (sellerName) break;
-          }
-          
-          // 2. 检查链接文本
-          if (element.tagName === 'A') {
-            const href = element.getAttribute('href');
-            if (href && (href.includes('/s?i=merchant-items') || 
-                        href.includes('/shops/') || 
-                        href.includes('seller=') || 
-                        href.includes('marketplaceID'))) {
-              sellerName = element.textContent.trim();
-              sellerUrl = href;
-              console.log(`找到卖家名称（通过链接）: ${sellerName}`);
-              break;
-            }
-          }
-        }
-        
-        if (sellerName) break;
-      } catch (error) {
-        console.error(`使用选择器 "${selector}" 提取卖家信息时出错:`, error);
-      }
-    }
-    
-    // 如果无法从卡片中获取卖家信息，尝试从产品详情页获取
-    let sellerResult = null;
-    let isChineseSeller = false;
-    
-    // 确定卖家类型函数
-    const determineSellerType = (sellerInfo) => {
-      // 如果有确认的中国卖家标志，直接返回中国卖家
-      if (sellerInfo.isConfirmedChinese) {
-        console.log(`卖家 ${sellerInfo.sellerName} 已确认为中国卖家`);
-        card.setAttribute('data-seller-type', 'chinese');
-        markChineseSeller(card);
-        return true;
-      }
-      
-      // 初始化检测类
-      if (!SellerDetector) {
-        console.log('SellerDetector未初始化，使用window.SellerDetector');
-        SellerDetector = window.SellerDetector;
-      }
-      
-      if (!SellerDetector) {
-        console.error('SellerDetector类不可用，无法判断卖家');
-        card.setAttribute('data-seller-type', 'unknown');
-        return false;
-      }
-      
-      // 创建检测器实例
-      const detector = new SellerDetector(settings.confidenceThreshold, settings.customKeywords);
-      
-      // 检测是否为中国卖家
-      isChineseSeller = detector.isChineseSeller(sellerInfo.sellerName, sellerInfo.sellerCountry);
-      
-      console.log(`卖家 ${sellerInfo.sellerName} 是中国卖家: ${isChineseSeller}`);
-      
-      // 更新卡片属性
-      card.setAttribute('data-seller-type', isChineseSeller ? 'chinese' : 'non-chinese');
-      
-      // 如果是中国卖家，标记卡片
-      if (isChineseSeller) {
-        markChineseSeller(card);
-      }
-      
-      return isChineseSeller;
-    };
-    
-    // 如果已有卖家信息，基于当前数据判断卖家类型
-    if (sellerName) {
-      sellerResult = { sellerName, sellerUrl };
-      isChineseSeller = determineSellerType(sellerResult);
-    } 
-    // 否则尝试从详情页获取
-    else if (asin) {
-      try {
-        // 构建产品页面URL
-        const productUrl = `https://www.amazon.com/dp/${asin}`;
-        console.log(`从产品详情页获取卖家信息: ${productUrl}`);
-        
-        // 获取卖家信息
-        sellerResult = await fetchSellerInfoFromProductPage(productUrl);
-        
-        if (sellerResult && sellerResult.sellerName) {
-          console.log(`从详情页获取到卖家信息: ${sellerResult.sellerName}`);
-          isChineseSeller = determineSellerType(sellerResult);
-        } else {
-          console.log('从详情页无法获取到卖家信息');
-          card.setAttribute('data-seller-type', 'unknown');
-        }
-      } catch (error) {
-        console.error('获取卖家详情时出错:', error);
-        card.setAttribute('data-seller-type', 'unknown');
-      }
-    } else {
-      console.log('没有ASIN和卖家信息，标记为未知卖家');
-      card.setAttribute('data-seller-type', 'unknown');
-    }
-    
-    return {
-      asin,
-      sellerName: sellerResult ? sellerResult.sellerName : '',
-      sellerUrl: sellerResult ? sellerResult.sellerUrl : '',
-      sellerCountry: sellerResult ? sellerResult.sellerCountry : '',
-      isChineseSeller,
-      isUnknown: !sellerResult || !sellerResult.sellerName
-    };
-  } catch (error) {
-    console.error('处理产品卡片时出错:', error);
-    // 确保卡片被标记为已处理，防止重复尝试
-    if (card) {
-      card.setAttribute('data-seller-processed', 'true');
-      card.setAttribute('data-seller-type', 'error');
-    }
-    return { error: error.message };
-  }
+  sellerListSection.appendChild(sellerListEl);
 }
 
 /**
@@ -1922,66 +2644,135 @@ function addFilterControls() {
   console.log('添加筛选控制面板');
   
   // 检查是否已存在
-  if (document.getElementById('filter-controls-container')) {
+  if (document.getElementById('cn-seller-filter-controls')) {
     console.log('筛选控制面板已存在，不重复添加');
     return;
   }
   
   // 创建筛选控制容器
   const filterContainer = document.createElement('div');
-  filterContainer.id = 'filter-controls-container';
+  filterContainer.id = 'cn-seller-filter-controls';
   filterContainer.className = 'cyberpunk-filter-controls';
+  
+  // 设置容器样式
+  filterContainer.style.position = 'sticky';
+  filterContainer.style.top = '0';
+  filterContainer.style.zIndex = '1000';
+  filterContainer.style.width = '100%';
+  filterContainer.style.backgroundColor = 'rgba(25, 25, 25, 0.95)';
+  filterContainer.style.padding = '10px 20px';
+  filterContainer.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.3)';
+  filterContainer.style.backdropFilter = 'blur(5px)';
+  filterContainer.style.borderBottom = '2px solid #ff0055';
   
   // 设置筛选控制面板的内容
   filterContainer.innerHTML = `
-    <div class="filter-section">
-      <h3>快速搜索</h3>
-      <div class="filter-buttons">
-        <button id="filter-all" class="cyberpunk-button">全部</button>
-        <button id="filter-chinese-only" class="cyberpunk-button">仅中国</button>
-        <button id="filter-hide-chinese" class="cyberpunk-button">隐藏中国</button>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; align-items:center; gap:15px;">
+        <div style="font-size:16px; color:white; font-weight:bold;">
+          中国卖家检测
+        </div>
+        <button id="scan-button" class="cyberpunk-button" style="padding:5px 15px; background-color:#ff0055; border:1px solid #ff0055; color:white; cursor:pointer; border-radius:3px; font-weight:bold;">扫描页面</button>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button id="filter-all" class="cyberpunk-button" style="padding:5px 15px; background-color:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:white; cursor:pointer; border-radius:3px;">全部</button>
+        <button id="filter-chinese-only" class="cyberpunk-button" style="padding:5px 15px; background-color:rgba(255,0,85,0.1); border:1px solid #ff0055; color:white; cursor:pointer; border-radius:3px;">仅中国卖家</button>
+        <button id="filter-hide-chinese" class="cyberpunk-button" style="padding:5px 15px; background-color:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:white; cursor:pointer; border-radius:3px;">非中国卖家</button>
       </div>
     </div>
   `;
   
-  // 设置样式
-  filterContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-  filterContainer.style.padding = '15px';
-  filterContainer.style.borderRadius = '8px';
-  filterContainer.style.margin = '15px 0';
-  filterContainer.style.border = '2px solid var(--highlight-color, #ff0055)';
-  filterContainer.style.boxShadow = '0 0 10px var(--highlight-color, #ff0055)';
-  filterContainer.style.color = '#fff';
-  
-  // 查找搜索结果区域来插入筛选控件
-  const searchResults = document.querySelector('.s-result-list') || 
-                       document.querySelector('.s-search-results') || 
-                       document.getElementById('search-results') ||
-                       document.querySelector('.s-main-slot') ||
-                       document.querySelector('#search');
-  
-  if (!searchResults) {
-    console.error('无法找到搜索结果容器，无法添加筛选控件');
-    return;
+  // 添加到页面
+  const insertLocation = determineFilterControlsInsertLocation();
+  if (insertLocation) {
+    insertLocation.parentNode.insertBefore(filterContainer, insertLocation);
+  } else {
+    // 备用插入位置 - 页面顶部
+    document.body.insertBefore(filterContainer, document.body.firstChild);
   }
   
-  // 插入到搜索结果前面
-  searchResults.parentNode.insertBefore(filterContainer, searchResults);
+  // 添加扫描按钮事件
+  document.getElementById('scan-button').addEventListener('click', () => {
+    console.log('用户点击扫描按钮');
+    
+    // 确保扫描状态容器存在
+    const statusContainer = ensureScanStatusContainer();
+    
+    // 显示扫描状态容器
+    statusContainer.style.display = 'block';
+    setTimeout(() => {
+      statusContainer.style.opacity = '1';
+      statusContainer.style.transform = 'translateY(0)';
+    }, 10);
+    
+    // 清除之前的标记并开始新的扫描
+    removeAllMarks();
+    processSearchPage();
+  });
   
-  // 添加筛选按钮点击事件
-  document.getElementById('filter-all').addEventListener('click', function() {
+  // 添加过滤按钮事件
+  document.getElementById('filter-all').addEventListener('click', () => {
     handleFilterButtonClick('all');
   });
   
-  document.getElementById('filter-chinese-only').addEventListener('click', function() {
+  document.getElementById('filter-chinese-only').addEventListener('click', () => {
     handleFilterButtonClick('chinese-only');
   });
   
-  document.getElementById('filter-hide-chinese').addEventListener('click', function() {
+  document.getElementById('filter-hide-chinese').addEventListener('click', () => {
     handleFilterButtonClick('hide-chinese');
   });
   
+  // 初始化按钮状态
+  updateFilterButtonsState(settings.filterMode || 'all');
+  
   console.log('筛选控制面板添加完成');
+}
+
+// 确定筛选控制面板的插入位置
+function determineFilterControlsInsertLocation() {
+  // 尝试查找不同电商网站的顶部导航栏
+  
+  // Amazon常见的顶部导航选择器
+  const possibleSelectors = [
+    '.nav-belt',
+    '#navbar', 
+    '#nav-main', 
+    '#navbar-main', 
+    '#nav-belt',
+    '#nav-subnav',
+    '#nav-search',
+    '#search',
+    '.s-desktop-toolbar',
+    '.a-section.a-spacing-small.a-spacing-top-small'
+  ];
+  
+  // 首先尝试找到nav-belt作为首选
+  const navBelt = document.querySelector('.nav-belt');
+  if (navBelt) {
+    console.log('找到.nav-belt作为首选插入位置');
+    return navBelt.nextElementSibling;
+  }
+  
+  // 然后尝试其他选择器
+  for (const selector of possibleSelectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      console.log(`找到${selector}作为插入位置`);
+      return element.nextElementSibling || element;
+    }
+  }
+  
+  // 如果所有选择器都失败，找到页面中的第一个主要内容区域
+  const mainContent = document.querySelector('main') || document.querySelector('#content') || document.querySelector('.content');
+  if (mainContent) {
+    console.log('使用主内容区域作为备用插入位置');
+    return mainContent;
+  }
+  
+  // 最后的备用方案 - 页面顶部
+  console.log('使用页面顶部作为最终备用插入位置');
+  return document.body.firstElementChild;
 }
 
 /**
@@ -1989,23 +2780,52 @@ function addFilterControls() {
  * @param {string} mode - 筛选模式：'all', 'chinese-only', 或 'hide-chinese'
  */
 function handleFilterButtonClick(mode) {
-  console.log(`筛选模式切换: ${mode}`);
+  console.log(`筛选按钮点击: ${mode}`);
   
-  // 保存设置
+  // 保存当前筛选模式到设置中
   settings.filterMode = mode;
-  chrome.storage.sync.set({ filterMode: mode });
   
-  // 应用筛选
-  applyFilterMode(mode);
+  // 保存到存储
+  chrome.storage.local.set({settings}, () => {
+    console.log(`筛选模式已保存: ${mode}`);
+  });
   
-  // 更新UI状态
+  // 如果选择的是中国卖家模式，且当前页面是搜索结果页，则触发重新扫描
+  if (mode === 'chinese-only' && determinePageType() === 'search') {
+    console.log('选择了仅中国卖家模式，准备重新扫描...');
+    
+    // 先清除之前的标记
+    removeAllMarks();
+    
+    // 然后启动新的扫描
+    setTimeout(() => {
+      processSearchPage();
+    }, 500);
+  } else {
+    // 其他模式直接应用筛选
+    applyFilterMode(mode);
+  }
+  
+  // 更新筛选按钮高亮状态
   updateFilterButtonsState(mode);
   
-  // 更新当前筛选模式显示
+  // 更新筛选模式显示
   updateCurrentFilterMode(mode);
   
-  // 重新扫描页面以确保所有产品都被处理
-  processSearchPage();
+  // 更新统计数据显示 - 查找当前状态容器并刷新
+  const statusContainer = document.getElementById('cn-seller-scan-status');
+  if (statusContainer) {
+    const progressText = statusContainer.querySelector('.scan-progress-text');
+    if (progressText) {
+      const progressMatch = progressText.textContent.match(/已扫描: (\d+)\/(\d+)/);
+      if (progressMatch && progressMatch.length === 3) {
+        const current = parseInt(progressMatch[1]);
+        const total = parseInt(progressMatch[2]);
+        // 重新更新状态以刷新统计数据
+        updateScanStatus(false, current, total, mode === 'chinese-only' ? '正在重新扫描...' : '筛选模式已更新', false, Math.round((current / total) * 100));
+      }
+    }
+  }
 }
 
 /**
@@ -2013,13 +2833,66 @@ function handleFilterButtonClick(mode) {
  * @param {string} activeMode - 当前激活的筛选模式
  */
 function updateFilterButtonsState(activeMode) {
+  console.log(`更新筛选按钮状态: ${activeMode}`);
+  
+  // 获取所有筛选按钮
   const allButton = document.getElementById('filter-all');
   const chineseOnlyButton = document.getElementById('filter-chinese-only');
   const hideChineseButton = document.getElementById('filter-hide-chinese');
   
-  if (allButton) allButton.classList.toggle('active', activeMode === 'all');
-  if (chineseOnlyButton) chineseOnlyButton.classList.toggle('active', activeMode === 'chinese-only');
-  if (hideChineseButton) hideChineseButton.classList.toggle('active', activeMode === 'hide-chinese');
+  if (!allButton || !chineseOnlyButton || !hideChineseButton) {
+    console.log('找不到筛选按钮，无法更新状态');
+    return;
+  }
+  
+  // 重置所有按钮的状态
+  const resetButtons = () => {
+    [allButton, chineseOnlyButton, hideChineseButton].forEach(button => {
+      button.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+      button.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+      button.style.color = 'white';
+      button.style.fontWeight = 'normal';
+      button.style.boxShadow = 'none';
+    });
+  };
+  
+  // 首先重置所有按钮
+  resetButtons();
+  
+  // 然后设置激活的按钮
+  switch (activeMode) {
+    case 'all':
+      allButton.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+      allButton.style.border = '1px solid #4CAF50';
+      allButton.style.color = '#ffffff';
+      allButton.style.fontWeight = 'bold';
+      allButton.style.boxShadow = '0 0 5px rgba(76, 175, 80, 0.5)';
+      break;
+      
+    case 'chinese-only':
+      chineseOnlyButton.style.backgroundColor = 'rgba(255, 0, 85, 0.2)';
+      chineseOnlyButton.style.border = '1px solid #ff0055';
+      chineseOnlyButton.style.color = '#ffffff';
+      chineseOnlyButton.style.fontWeight = 'bold';
+      chineseOnlyButton.style.boxShadow = '0 0 5px rgba(255, 0, 85, 0.5)';
+      break;
+      
+    case 'hide-chinese':
+      hideChineseButton.style.backgroundColor = 'rgba(33, 150, 243, 0.2)';
+      hideChineseButton.style.border = '1px solid #2196F3';
+      hideChineseButton.style.color = '#ffffff';
+      hideChineseButton.style.fontWeight = 'bold';
+      hideChineseButton.style.boxShadow = '0 0 5px rgba(33, 150, 243, 0.5)';
+      break;
+      
+    default:
+      // 如果没有有效的模式，默认为"全部"
+      allButton.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+      allButton.style.border = '1px solid #4CAF50';
+      allButton.style.color = '#ffffff';
+      allButton.style.fontWeight = 'bold';
+      break;
+  }
 }
 
 /**
@@ -2058,56 +2931,112 @@ function updateCurrentFilterMode(mode) {
 
 /**
  * 应用筛选模式
- * @param {string} mode - 筛选模式：'all', 'chinese-only', 或 'hide-chinese'
+ * @param {string} mode - 筛选模式 (all, chinese-only, hide-chinese)
  */
 function applyFilterMode(mode) {
   console.log(`应用筛选模式: ${mode}`);
   
   // 获取所有已处理的产品卡片
   const cards = document.querySelectorAll('[data-seller-processed="true"]');
+  console.log(`应用筛选到 ${cards.length} 个已处理卡片`);
   
   // 根据不同模式应用筛选
   switch (mode) {
     case 'all':
-      // 显示所有卡片
+      // 显示所有卡片并恢复默认样式
       cards.forEach(card => {
         const parentElement = findProductCardParent(card);
         if (parentElement) {
+          // 显示所有卡片
           parentElement.style.display = '';
+          
+          // 恢复中国卖家的高亮样式，非中国卖家恢复默认样式
+          const sellerType = card.getAttribute('data-seller-type');
+          if (sellerType === 'chinese') {
+            // 恢复中国卖家的高亮
+            parentElement.style.opacity = '1';
+            parentElement.style.filter = 'none';
+            if (!parentElement.style.border || parentElement.style.border === 'none') {
+              parentElement.style.setProperty('--highlight-color', settings.highlightColor || '#ff0055');
+              parentElement.style.border = '3px solid var(--highlight-color)';
+              parentElement.style.boxShadow = '0 0 12px var(--highlight-color)';
+            }
+          } else {
+            // 确保非中国卖家没有特殊样式
+            parentElement.style.opacity = '1';
+            parentElement.style.filter = 'none';
+          }
         }
       });
+      console.log('已显示所有商品卡片，并恢复默认样式');
       break;
       
     case 'chinese-only':
-      // 只显示中国卖家
+      // 突出显示中国卖家，淡化其他卡片
       cards.forEach(card => {
         const sellerType = card.getAttribute('data-seller-type');
         const parentElement = findProductCardParent(card);
         
         if (parentElement) {
+          // 所有卡片都保持可见
+          parentElement.style.display = '';
+          
           if (sellerType === 'chinese') {
-            parentElement.style.display = '';
+            // 突出显示中国卖家
+            parentElement.style.opacity = '1';
+            parentElement.style.filter = 'none';
+            parentElement.style.zIndex = '2';
+            if (!parentElement.style.border || parentElement.style.border === 'none') {
+              parentElement.style.setProperty('--highlight-color', settings.highlightColor || '#ff0055');
+              parentElement.style.border = '3px solid var(--highlight-color)';
+              parentElement.style.boxShadow = '0 0 12px var(--highlight-color)';
+            }
           } else {
-            parentElement.style.display = 'none';
+            // 淡化非中国卖家
+            parentElement.style.opacity = '0.4';
+            parentElement.style.filter = 'grayscale(80%)';
+            parentElement.style.zIndex = '1';
+            // 移除边框高亮
+            parentElement.style.border = 'none';
+            parentElement.style.boxShadow = 'none';
           }
         }
       });
+      console.log('已突出显示中国卖家商品，淡化其他商品');
       break;
       
     case 'hide-chinese':
-      // 隐藏中国卖家
+      // 突出显示非中国卖家，淡化中国卖家
       cards.forEach(card => {
         const sellerType = card.getAttribute('data-seller-type');
         const parentElement = findProductCardParent(card);
         
         if (parentElement) {
+          // 所有卡片都保持可见
+          parentElement.style.display = '';
+          
           if (sellerType === 'chinese') {
-            parentElement.style.display = 'none';
+            // 淡化中国卖家
+            parentElement.style.opacity = '0.4';
+            parentElement.style.filter = 'grayscale(80%)';
+            parentElement.style.zIndex = '1';
+            // 保留边框但减弱显示
+            if (parentElement.style.border) {
+              parentElement.style.border = '1px solid var(--highlight-color, #ff0055)';
+              parentElement.style.boxShadow = 'none';
+            }
           } else {
-            parentElement.style.display = '';
+            // 突出显示非中国卖家
+            parentElement.style.opacity = '1';
+            parentElement.style.filter = 'none';
+            parentElement.style.zIndex = '2';
+            // 清除边框，保持干净外观
+            parentElement.style.border = 'none';
+            parentElement.style.boxShadow = 'none';
           }
         }
       });
+      console.log('已突出显示非中国卖家商品，淡化中国卖家商品');
       break;
   }
   
@@ -2155,180 +3084,1222 @@ function findProductCardParent(card) {
 }
 
 /**
- * 标记中国卖家产品卡片
+ * 在产品卡片上标记中国卖家
  * @param {Element} card - 产品卡片元素
  */
 function markChineseSeller(card) {
   try {
-    // 检查卡片是否有效
-    if (!card) {
-      console.log('卡片为空，无法标记');
+    // 检查卡片是否已处理过
+    if (card.dataset.processed === 'true') {
       return;
     }
     
-    // 检查卡片是否已经被标记
-    if (card.hasAttribute('data-marked-chinese')) {
-      console.log('卡片已被标记为中国卖家，跳过');
-      return;
+    // 标记卡片为已处理
+    card.dataset.processed = 'true';
+    
+    // 获取卡片ID
+    const cardId = Date.now() + '-' + Math.floor(Math.random() * 10000);
+    card.dataset.cardId = cardId;
+    
+    // 添加产品URL到数据集
+    let productUrl = '';
+    const titleElement = card.querySelector('h2 a, h5 a, .a-size-base-plus a, .a-size-mini a, [data-cy="title-recipe"] a');
+    
+    if (titleElement && titleElement.href) {
+      productUrl = titleElement.href;
+      card.dataset.productUrl = productUrl;
+      
+      // 提取ASIN
+      const asinMatch = productUrl.match(/\/([A-Z0-9]{10})(?:\/|\?|$)/);
+      if (asinMatch && asinMatch[1]) {
+        card.dataset.asin = asinMatch[1];
+      }
     }
     
-    console.log('开始标记中国卖家产品卡片');
+    // 获取卖家名称和原始卖家元素
+    let sellerElement = null;
+    let sellerName = null;
     
-    // 获取卡片的父元素（容器）
-    let container = null;
-    try {
-      container = findProductCardParent(card);
-      if (!container) {
-        console.log('找不到卡片的父容器，使用卡片本身');
-        container = card; // 如果找不到父容器，使用卡片本身
-      }
-    } catch (error) {
-      console.error('查找卡片父容器时出错:', error);
-      container = card; // 出错时使用卡片本身
-    }
+    // 卖家元素可能出现在不同位置
+    const sellerSelectors = [
+      '.a-row .a-size-base:not([class*="a-color-price"]):not([class*="a-text-price"])',
+      '.a-row [data-cy="seller-name"]',
+      '.a-row .a-size-small:not([class*="a-color-price"]):not([class*="a-text-price"])',
+      '.a-row .a-size-base-plus:not([class*="a-color-price"]):not([class*="a-text-price"])',
+      '.a-row a[href*="seller="]',
+      '.s-seller-details',
+      '[data-component-type="s-seller-data"]',
+      '.a-row:nth-child(2) span.a-size-small',
+      '.s-title-instructions-style span',
+      '.a-box-inner .a-row:not([class*="a-price"])',
+      // 新增选择器
+      '.a-row:has(a[href*="seller="])',
+      '.a-section:has(a[href*="seller="])',
+      '.s-productinfo-block',
+      '[data-cy="seller-name"]',
+      '[data-feature-name="seller"]'
+    ];
     
-    // 标记卡片已经处理
-    try {
-      card.setAttribute('data-marked-chinese', 'true');
-    } catch (error) {
-      console.error('标记卡片属性时出错:', error);
-    }
-    
-    // 创建和应用标记
-    try {
-      // 创建标记元素
-      const marker = document.createElement('div');
-      marker.className = 'chinese-seller-marker';
-      marker.innerHTML = `
-        <div class="marker-content">
-          <span class="marker-flag">CN</span>
-          <span class="marker-text">中国卖家</span>
-        </div>
-      `;
+    for (const selector of sellerSelectors) {
+      const elements = card.querySelectorAll(selector);
       
-      // 应用样式
-      marker.style.position = 'absolute';
-      marker.style.top = '5px';
-      marker.style.right = '5px';
-      marker.style.zIndex = '1000';
-      marker.style.backgroundColor = settings.markerColor || 'rgba(255, 0, 85, 0.85)';
-      marker.style.color = '#fff';
-      marker.style.padding = '4px 8px';
-      marker.style.borderRadius = '4px';
-      marker.style.fontSize = '12px';
-      marker.style.fontWeight = 'bold';
-      marker.style.textShadow = '0 0 2px rgba(0, 0, 0, 0.7)';
-      marker.style.boxShadow = '0 0 5px rgba(0, 0, 0, 0.3)';
-      marker.style.display = 'flex';
-      marker.style.alignItems = 'center';
-      marker.style.justifyContent = 'center';
-      marker.style.lineHeight = '1';
-      marker.style.transition = 'all 0.3s ease';
-      marker.style.animation = 'marker-appear 0.5s ease';
-      marker.style.pointerEvents = 'none'; // 防止marker阻止点击
-      
-      // 标记内容样式
-      const markerContent = marker.querySelector('.marker-content');
-      if (markerContent) {
-        markerContent.style.display = 'flex';
-        markerContent.style.alignItems = 'center';
-        markerContent.style.gap = '5px';
-      }
-      
-      // 国旗样式
-      const markerFlag = marker.querySelector('.marker-flag');
-      if (markerFlag) {
-        markerFlag.style.fontWeight = 'bold';
-        markerFlag.style.fontSize = '10px';
-        markerFlag.style.backgroundColor = '#d0021b';
-        markerFlag.style.color = '#fff';
-        markerFlag.style.padding = '2px 4px';
-        markerFlag.style.borderRadius = '2px';
-        markerFlag.style.display = 'inline-block';
-      }
-      
-      // 设置容器为相对定位，以便标记可以绝对定位
-      const containerPosition = window.getComputedStyle(container).position;
-      if (containerPosition === 'static') {
-        container.style.position = 'relative';
-      }
-      
-      // 添加动画样式（如果还不存在）
-      if (!document.getElementById('chinese-seller-marker-styles')) {
-        const styleElement = document.createElement('style');
-        styleElement.id = 'chinese-seller-marker-styles';
-        styleElement.textContent = `
-          @keyframes marker-appear {
-            0% { opacity: 0; transform: translateY(-10px); }
-            100% { opacity: 1; transform: translateY(0); }
-          }
-          
-          .chinese-seller-marker {
-            position: absolute;
-            top: 5px;
-            right: 5px;
-            z-index: 9999;
-            background-color: rgba(255, 0, 85, 0.85);
-            color: #fff;
-            border-radius: 4px;
-            animation: marker-appear 0.5s ease;
-          }
-          
-          .cn-seller-card {
-            border: 2px solid rgba(255, 0, 85, 0.85) !important;
-            box-shadow: 0 0 10px rgba(255, 0, 85, 0.3) !important;
-            position: relative;
-          }
-          
-          .cn-seller-title {
-            color: #ff0055 !important;
-            text-shadow: 0 0 1px rgba(255, 0, 85, 0.3) !important;
-            font-weight: bold !important;
-          }
-        `;
-        document.head.appendChild(styleElement);
-      }
-      
-      // 将标记添加到容器中
-      container.appendChild(marker);
-      
-      // 添加醒目的边框
-      container.classList.add('cn-seller-card');
-      container.style.border = `2px solid ${settings.markerColor || 'rgba(255, 0, 85, 0.85)'}`;
-      container.style.boxShadow = `0 0 10px ${settings.markerColor || 'rgba(255, 0, 85, 0.3)'}`;
-      
-      // 尝试标记产品标题
-      try {
-        // 查找产品标题
-        const titleSelectors = [
-          'h2 a', 
-          '.a-size-medium', 
-          '.a-size-base-plus', 
-          '[data-cy="title-recipe"]',
-          'h5 a',
-          '.a-link-normal .a-text-normal',
-          '.a-color-base.a-text-normal'
-        ];
+      for (const element of elements) {
+        // 忽略价格和评分元素
+        if (
+          element.textContent.includes('$') || 
+          element.textContent.includes('€') ||
+          element.textContent.includes('£') ||
+          element.textContent.includes('stars') ||
+          element.textContent.includes('rating') ||
+          element.className.includes('price') ||
+          element.className.includes('stars') ||
+          element.className.includes('rating') ||
+          element.parentElement.className.includes('price') ||
+          element.parentElement.className.includes('stars') ||
+          element.parentElement.className.includes('rating')
+        ) {
+          continue;
+        }
         
-        for (const selector of titleSelectors) {
-          const titleElement = container.querySelector(selector);
-          if (titleElement) {
-            titleElement.classList.add('cn-seller-title');
-            titleElement.style.color = '#ff0055';
-            titleElement.style.textShadow = '0 0 1px rgba(255, 0, 85, 0.3)';
-            titleElement.style.fontWeight = 'bold';
+        // 查找包含"by"的文本，这通常表示卖家信息
+        const text = element.textContent.trim();
+        const byMatch = text.match(/(?:sold|Ships|by|from)[\s:]+([^|.]+)(?:\||.|$)/i);
+        
+        if (byMatch && byMatch[1]) {
+          sellerName = byMatch[1].trim();
+          sellerElement = element;
+          break;
+        }
+        
+        // 尝试查找卖家链接
+        const sellerLink = element.querySelector('a[href*="seller="]');
+        if (sellerLink) {
+          sellerName = sellerLink.textContent.trim();
+          sellerElement = element;
+          
+          // 提取卖家ID
+          const sellerIdMatch = sellerLink.href.match(/seller=([A-Z0-9]+)/i);
+          if (sellerIdMatch && sellerIdMatch[1]) {
+            card.dataset.sellerId = sellerIdMatch[1];
+          }
+          
+          break;
+        }
+      }
+      
+      if (sellerName) break;
+    }
+    
+    // 如果找不到卖家名称，尝试从整个卡片中提取
+    if (!sellerName) {
+      // 尝试从卡片文本提取卖家信息
+      const cardText = card.textContent;
+      const byMatches = [
+        ...cardText.matchAll(/(?:sold|ship|by|from)[\s:]+([^\n|.]+)(?:\||.|$)/gi)
+      ];
+      
+      for (const match of byMatches) {
+        if (match[1] && match[1].trim() && !match[1].includes('$') && !match[1].includes('€') && !match[1].includes('£')) {
+          sellerName = match[1].trim();
+          break;
+        }
+      }
+    }
+    
+    // 如果没有找到卖家信息，尝试通过商品页面获取
+    if (!sellerName && productUrl) {
+      card.dataset.pendingSellerInfo = 'true';
+      
+      const fetchDelay = Math.floor(Math.random() * 1000) + 500; // 添加随机延迟，避免频繁请求
+      
+      setTimeout(async () => {
+        try {
+          // 避免重复提取
+          if (card.dataset.sellerInfoFetched === 'true') return;
+          card.dataset.sellerInfoFetched = 'true';
+          
+          console.log(`通过商品页面获取卖家信息: ${productUrl}`);
+          const sellerInfo = await fetchSellerInfoFromProductPage(productUrl);
+          
+          if (sellerInfo && sellerInfo.sellerName) {
+            sellerName = sellerInfo.sellerName;
+            card.dataset.sellerName = sellerName;
+            
+            if (sellerInfo.sellerId) {
+              card.dataset.sellerId = sellerInfo.sellerId;
+            }
+            
+            if (sellerInfo.sellerUrl) {
+              card.dataset.sellerUrl = sellerInfo.sellerUrl;
+            }
+            
+            if (sellerInfo.isConfirmedChinese) {
+              card.dataset.isConfirmedChinese = 'true';
+            }
+            
+            // 重新检查是否为中国卖家
+            const sellerDetector = window.SellerDetector.getInstance();
+            const isChineseSeller = sellerDetector.isChineseSeller(sellerName, sellerInfo);
+            
+            if (isChineseSeller) {
+              card.dataset.chineseSeller = 'true';
+              
+              // 更新统计和UI
+              const features = getChineseFeatures(sellerName, sellerInfo);
+              card.dataset.features = features.join(', ');
+              
+              // 添加可视化标记
+              addVisualMarker(card, sellerName, features, sellerInfo);
+              
+              // 更新卖家列表
+              updateSellerListInPanel(cardId, sellerName, card.dataset.asin);
+            }
+          }
+        } catch (error) {
+          console.error('通过商品页面获取卖家信息时出错:', error);
+        }
+      }, fetchDelay);
+      
+      return;
+    }
+    
+    // 如果找到卖家名称，记录并检查是否为中国卖家
+    if (sellerName) {
+      card.dataset.sellerName = sellerName;
+      
+      // 检查是否为中国卖家
+      const sellerDetector = window.SellerDetector.getInstance();
+      const isChineseSeller = sellerDetector.isChineseSeller(sellerName);
+      
+      // 如果是中国卖家，标记卡片并应用视觉样式
+      if (isChineseSeller) {
+        card.dataset.chineseSeller = 'true';
+        
+        // 获取中国特征并存储
+        const features = getChineseFeatures(sellerName);
+        card.dataset.features = features.join(', ');
+        
+        // 添加可视化标记
+        addVisualMarker(card, sellerName, features);
+        
+        // 更新卖家列表
+        updateSellerListInPanel(cardId, sellerName, card.dataset.asin);
+      }
+    }
+  } catch (error) {
+    console.error('标记中国卖家时出错:', error);
+  }
+}
+
+// 添加可视化标记到卡片
+function addVisualMarker(card, sellerName, features, sellerInfo) {
+  try {
+    // 确保不会重复添加标记
+    if (card.querySelector('.chinese-seller-marker')) {
+      return;
+    }
+    
+    // 创建标记元素
+    const marker = document.createElement('div');
+    marker.className = 'chinese-seller-marker';
+    marker.style.backgroundColor = '#ffdddd';
+    marker.style.border = '2px solid #ff6666';
+    marker.style.borderRadius = '4px';
+    marker.style.padding = '4px 8px';
+    marker.style.margin = '4px 0';
+    marker.style.fontSize = '13px';
+    marker.style.fontWeight = 'bold';
+    marker.style.color = '#cc0000';
+    marker.style.boxShadow = '0 1px 3px rgba(0,0,0,0.12)';
+    marker.style.position = 'relative';
+    marker.style.zIndex = '10';
+    marker.style.display = 'flex';
+    marker.style.alignItems = 'center';
+    marker.style.justifyContent = 'space-between';
+    
+    // 确定信心级别并显示信息
+    let confidence = 'middle';
+    let confidenceIcon = '⚠️';
+    
+    if (sellerInfo && sellerInfo.confidence) {
+      if (sellerInfo.confidence >= 0.9) {
+        confidence = 'high';
+        confidenceIcon = '🔴';
+      } else if (sellerInfo.confidence >= 0.7) {
+        confidence = 'middle';
+        confidenceIcon = '⚠️';
+      } else {
+        confidence = 'low';
+        confidenceIcon = '❓';
+      }
+    }
+    
+    // 创建主要信息
+    const infoDiv = document.createElement('div');
+    infoDiv.style.display = 'flex';
+    infoDiv.style.alignItems = 'center';
+    infoDiv.style.flex = '1';
+    
+    // 添加信心图标
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = confidenceIcon;
+    iconSpan.style.marginRight = '6px';
+    iconSpan.style.fontSize = '16px';
+    infoDiv.appendChild(iconSpan);
+    
+    // 添加卖家信息
+    const textSpan = document.createElement('span');
+    textSpan.textContent = `中国卖家: ${sellerName}`;
+    infoDiv.appendChild(textSpan);
+    
+    // 添加详情按钮
+    const detailsButton = document.createElement('button');
+    detailsButton.textContent = '详情';
+    detailsButton.style.marginLeft = '8px';
+    detailsButton.style.padding = '2px 6px';
+    detailsButton.style.backgroundColor = '#f0f0f0';
+    detailsButton.style.border = '1px solid #ccc';
+    detailsButton.style.borderRadius = '3px';
+    detailsButton.style.cursor = 'pointer';
+    detailsButton.style.fontSize = '11px';
+    
+    // 添加详情按钮事件
+    detailsButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // 显示详情面板
+      showSellerDetailPanel(sellerName, sellerInfo, card.dataset.asin, card.dataset.cardId);
+    });
+    
+    marker.appendChild(infoDiv);
+    marker.appendChild(detailsButton);
+    
+    // 寻找适合插入标记的位置
+    const insertPositions = [
+      card.querySelector('h2'),
+      card.querySelector('.a-price'),
+      card.querySelector('.a-row:first-child'),
+      card.querySelector('.s-title-instructions-style'),
+      card.querySelector('.a-section'),
+      card
+    ];
+    
+    let inserted = false;
+    for (const position of insertPositions) {
+      if (position) {
+        position.insertAdjacentElement('afterend', marker);
+        inserted = true;
+        break;
+      }
+    }
+    
+    // 如果无法找到合适的位置，直接附加到卡片末尾
+    if (!inserted) {
+      card.appendChild(marker);
+    }
+    
+    // 视觉上强调整个卡片
+    card.style.position = 'relative';
+    
+    // 添加卡片边框
+    const border = document.createElement('div');
+    border.className = 'chinese-seller-border';
+    border.style.position = 'absolute';
+    border.style.top = '0';
+    border.style.left = '0';
+    border.style.right = '0';
+    border.style.bottom = '0';
+    border.style.pointerEvents = 'none';
+    border.style.border = '3px solid #ff6666';
+    border.style.borderRadius = '4px';
+    border.style.zIndex = '2';
+    
+    // 确保不会重复添加边框
+    if (!card.querySelector('.chinese-seller-border')) {
+      card.appendChild(border);
+    }
+    
+  } catch (error) {
+    console.error('添加可视化标记时出错:', error);
+  }
+}
+
+/**
+ * 更新状态面板中的卖家列表
+ * @param {string} cardId - 卡片ID
+ * @param {string} sellerName - 卖家名称
+ * @param {string} asin - 产品ASIN
+ */
+function updateSellerListInPanel(cardId, sellerName, asin) {
+  // 获取或创建卖家列表容器
+  const statusContainer = document.getElementById('cn-seller-scan-status');
+  if (!statusContainer) return;
+  
+  let sellerListSection = statusContainer.querySelector('.seller-list-section');
+  if (!sellerListSection) {
+    sellerListSection = document.createElement('div');
+    sellerListSection.className = 'seller-list-section';
+    sellerListSection.style.marginTop = '15px';
+    sellerListSection.style.borderTop = '1px solid #eee';
+    sellerListSection.style.paddingTop = '10px';
+    sellerListSection.style.maxHeight = '300px';
+    sellerListSection.style.overflowY = 'auto';
+    
+    // 创建标题
+    const title = document.createElement('div');
+    title.style.fontWeight = 'bold';
+    title.style.marginBottom = '8px';
+    title.textContent = '已识别中国卖家列表:';
+    sellerListSection.appendChild(title);
+    
+    // 创建卖家列表容器
+    const listContainer = document.createElement('div');
+    listContainer.className = 'seller-list-container';
+    sellerListSection.appendChild(listContainer);
+    
+    // 添加到状态容器
+    statusContainer.appendChild(sellerListSection);
+  }
+  
+  // 获取卖家列表容器
+  const listContainer = sellerListSection.querySelector('.seller-list-container');
+  
+  // 检查是否已存在此卖家
+  const existingItem = listContainer.querySelector(`[data-card-id="${cardId}"]`);
+  if (existingItem) return;
+  
+  // 创建卖家列表项
+  const listItem = document.createElement('div');
+  listItem.className = 'seller-list-item';
+  listItem.setAttribute('data-card-id', cardId);
+  listItem.setAttribute('data-asin', asin);
+  listItem.style.padding = '5px 0';
+  listItem.style.display = 'flex';
+  listItem.style.justifyContent = 'space-between';
+  listItem.style.alignItems = 'center';
+  listItem.style.borderBottom = '1px solid #f0f0f0';
+  
+  // 设置卖家名称
+  const nameSpan = document.createElement('span');
+  nameSpan.textContent = sellerName.length > 20 ? sellerName.substring(0, 20) + '...' : sellerName;
+  nameSpan.title = sellerName;
+  nameSpan.style.overflow = 'hidden';
+  nameSpan.style.textOverflow = 'ellipsis';
+  nameSpan.style.whiteSpace = 'nowrap';
+  nameSpan.style.flex = '1';
+  
+  // 创建跳转按钮
+  const jumpButton = document.createElement('button');
+  jumpButton.textContent = '跳转';
+  jumpButton.style.background = 'var(--highlight-color, #ff0055)';
+  jumpButton.style.color = 'white';
+  jumpButton.style.border = 'none';
+  jumpButton.style.borderRadius = '3px';
+  jumpButton.style.padding = '3px 8px';
+  jumpButton.style.marginLeft = '10px';
+  jumpButton.style.cursor = 'pointer';
+  jumpButton.style.fontSize = '12px';
+  jumpButton.style.fontWeight = 'bold';
+  
+  // 添加跳转功能
+  jumpButton.onclick = function(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // 查找对应元素
+    const targetElement = document.getElementById(cardId);
+    if (targetElement) {
+      // 平滑滚动到目标位置
+      targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // 添加高亮效果
+      targetElement.style.transition = 'box-shadow 0.5s ease';
+      const originalBoxShadow = targetElement.style.boxShadow;
+      targetElement.style.boxShadow = '0 0 30px var(--highlight-color, #ff0055)';
+      
+      // 恢复原来的阴影
+      setTimeout(() => {
+        targetElement.style.boxShadow = originalBoxShadow;
+      }, 2000);
+    }
+  };
+  
+  // 组合元素
+  listItem.appendChild(nameSpan);
+  listItem.appendChild(jumpButton);
+  
+  // 添加到列表
+  listContainer.appendChild(listItem);
+}
+
+/**
+ * 显示卖家详细信息面板
+ * @param {string} sellerName - 卖家名称
+ * @param {string} sellerInfo - 卖家信息
+ * @param {string} asin - 产品ASIN
+ * @param {string} cardId - 卡片ID
+ */
+function showSellerDetailPanel(sellerName, sellerInfo, asin, cardId) {
+  try {
+    console.log('[详情] 显示卖家详情面板:', sellerName);
+    
+    // 如果已存在详情面板，先移除它
+    let existingPanel = document.getElementById('seller-detail-panel');
+    if (existingPanel) {
+      existingPanel.remove();
+    }
+    
+    // 创建详情面板
+    const panel = document.createElement('div');
+    panel.id = 'seller-detail-panel';
+    panel.style.position = 'fixed';
+    panel.style.top = '80px';
+    panel.style.right = '20px';
+    panel.style.width = '350px';
+    panel.style.maxHeight = '80vh';
+    panel.style.overflowY = 'auto';
+    panel.style.backgroundColor = 'white';
+    panel.style.borderRadius = '8px';
+    panel.style.padding = '15px';
+    panel.style.boxShadow = '0 5px 30px rgba(0,0,0,0.4)';
+    panel.style.zIndex = '10000';
+    panel.style.fontFamily = 'Arial, sans-serif';
+    panel.style.border = '3px solid var(--highlight-color, #ff0055)';
+    panel.style.opacity = '0';
+    panel.style.transform = 'translateX(50px)';
+    panel.style.transition = 'all 0.3s ease-out';
+    
+    // 添加关闭按钮
+    const closeButton = document.createElement('button');
+    closeButton.textContent = '×';
+    closeButton.style.position = 'absolute';
+    closeButton.style.top = '10px';
+    closeButton.style.right = '10px';
+    closeButton.style.background = 'transparent';
+    closeButton.style.border = 'none';
+    closeButton.style.fontSize = '24px';
+    closeButton.style.lineHeight = '24px';
+    closeButton.style.color = '#444';
+    closeButton.style.cursor = 'pointer';
+    closeButton.style.padding = '0';
+    closeButton.style.width = '30px';
+    closeButton.style.height = '30px';
+    closeButton.style.display = 'flex';
+    closeButton.style.alignItems = 'center';
+    closeButton.style.justifyContent = 'center';
+    closeButton.style.borderRadius = '50%';
+    closeButton.style.transition = 'all 0.2s';
+    
+    closeButton.addEventListener('mouseover', () => {
+      closeButton.style.background = '#f0f0f0';
+      closeButton.style.color = 'var(--highlight-color, #ff0055)';
+    });
+    
+    closeButton.addEventListener('mouseout', () => {
+      closeButton.style.background = 'transparent';
+      closeButton.style.color = '#444';
+    });
+    
+    closeButton.addEventListener('click', () => {
+      panel.style.opacity = '0';
+      panel.style.transform = 'translateX(50px)';
+      setTimeout(() => panel.remove(), 300);
+    });
+    
+    panel.appendChild(closeButton);
+    
+    // 添加标题
+    const title = document.createElement('h2');
+    title.textContent = '中国卖家详情';
+    title.style.color = 'var(--highlight-color, #ff0055)';
+    title.style.marginTop = '0';
+    title.style.borderBottom = '2px solid #eee';
+    title.style.paddingBottom = '10px';
+    title.style.fontSize = '18px';
+    panel.appendChild(title);
+    
+    // 添加卖家信息
+    const infoContainer = document.createElement('div');
+    infoContainer.style.marginBottom = '15px';
+    infoContainer.style.lineHeight = '1.5';
+    
+    // 卖家名称
+    const nameRow = document.createElement('div');
+    nameRow.innerHTML = `<strong>卖家名称:</strong> <span style="word-break: break-word;">${sellerName}</span>`;
+    nameRow.style.marginBottom = '8px';
+    infoContainer.appendChild(nameRow);
+    
+    // ASIN
+    const asinRow = document.createElement('div');
+    asinRow.innerHTML = `<strong>商品ASIN:</strong> <a href="https://www.amazon.com/dp/${asin}" target="_blank" style="color: var(--highlight-color, #ff0055); text-decoration: none;">${asin}</a>`;
+    asinRow.style.marginBottom = '8px';
+    infoContainer.appendChild(asinRow);
+    
+    // 中国特征
+    const chineseFeatures = getChineseFeatures(sellerName, sellerInfo);
+    if (chineseFeatures.length > 0) {
+      const featuresRow = document.createElement('div');
+      featuresRow.innerHTML = `<strong>中国特征:</strong>`;
+      featuresRow.style.marginBottom = '5px';
+      
+      const featuresList = document.createElement('ul');
+      featuresList.style.margin = '5px 0 8px 20px';
+      featuresList.style.padding = '0';
+      
+      chineseFeatures.forEach(feature => {
+        const featureItem = document.createElement('li');
+        featureItem.textContent = feature;
+        featureItem.style.margin = '5px 0';
+        featuresList.appendChild(featureItem);
+      });
+      
+      featuresRow.appendChild(featuresList);
+      infoContainer.appendChild(featuresRow);
+    }
+    
+    panel.appendChild(infoContainer);
+    
+    // 添加导航按钮
+    const navButtonsContainer = document.createElement('div');
+    navButtonsContainer.style.display = 'flex';
+    navButtonsContainer.style.justifyContent = 'space-between';
+    navButtonsContainer.style.marginBottom = '15px';
+    
+    // 跳转到卡片按钮
+    const goToCardButton = document.createElement('button');
+    goToCardButton.textContent = '跳转到商品';
+    goToCardButton.className = 'action-button';
+    goToCardButton.addEventListener('click', () => {
+      const targetCard = document.getElementById(cardId);
+      if (targetCard) {
+        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 高亮闪烁效果
+        targetCard.style.animation = 'highlight-pulse 1s 3';
+        
+        // 仅当样式不存在时添加
+        if (!document.getElementById('highlight-pulse-style')) {
+          const style = document.createElement('style');
+          style.id = 'highlight-pulse-style';
+          style.textContent = `
+            @keyframes highlight-pulse {
+              0% { box-shadow: 0 0 10px var(--highlight-color, #ff0055); }
+              50% { box-shadow: 0 0 30px var(--highlight-color, #ff0055); }
+              100% { box-shadow: 0 0 10px var(--highlight-color, #ff0055); }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+      }
+    });
+    
+    // 查看卖家商店按钮
+    const viewStoreButton = document.createElement('button');
+    viewStoreButton.textContent = '查看卖家商店';
+    viewStoreButton.className = 'action-button';
+    
+    // 构建卖家商店链接
+    const encodedSellerName = encodeURIComponent(sellerName);
+    const sellerStoreUrl = `https://www.amazon.com/s?i=merchant-items&me=${encodedSellerName}`;
+    
+    viewStoreButton.addEventListener('click', () => {
+      window.open(sellerStoreUrl, '_blank');
+    });
+    
+    // 添加按钮样式
+    const buttonStyle = document.createElement('style');
+    buttonStyle.textContent = `
+      .action-button {
+        padding: 8px 12px;
+        border: none;
+        border-radius: 5px;
+        background-color: var(--highlight-color, #ff0055);
+        color: white;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .action-button:hover {
+        filter: brightness(110%);
+        transform: translateY(-2px);
+      }
+      
+      .action-button:active {
+        transform: translateY(0);
+      }
+    `;
+    document.head.appendChild(buttonStyle);
+    
+    navButtonsContainer.appendChild(goToCardButton);
+    navButtonsContainer.appendChild(viewStoreButton);
+    panel.appendChild(navButtonsContainer);
+    
+    // 添加卖家列表
+    const sellerListContainer = document.createElement('div');
+    sellerListContainer.id = 'seller-list-container';
+    panel.appendChild(sellerListContainer);
+    
+    // 添加到页面
+    document.body.appendChild(panel);
+    
+    // 显示动画
+    setTimeout(() => {
+      panel.style.opacity = '1';
+      panel.style.transform = 'translateX(0)';
+    }, 10);
+    
+    return panel;
+  } catch (error) {
+    console.error('[详情] 显示卖家详情面板时出错:', error);
+    return null;
+  }
+}
+
+// 获取卖家的中国特征
+function getChineseFeatures(sellerName, sellerInfo) {
+  try {
+    if (!sellerName) return [];
+    
+    const features = [];
+    const normalizedName = sellerName.toLowerCase();
+    
+    // 检查卖家名称中是否有中文字符
+    if (/[\u4e00-\u9fff]/.test(sellerName)) {
+      features.push('中文字符');
+    }
+    
+    // 检查是否包含常见中国城市名称
+    const chineseCities = [
+      'shenzhen', 'guangzhou', 'shanghai', 'beijing', 'hangzhou', 
+      'yiwu', 'ningbo', 'dongguan', 'foshan', 'xiamen', 'chengdu',
+      'nanjing', 'tianjin', 'wuhan', 'chongqing', 'zhongshan',
+      'suzhou', 'qingdao', 'dalian', 'guangdong', 'fujian', 'zhejiang'
+    ];
+    
+    for (const city of chineseCities) {
+      if (normalizedName.includes(city)) {
+        features.push(`包含城市名"${city}"`);
+        break;
+      }
+    }
+    
+    // 检查卖家名称格式是否符合中国卖家特征
+    const chinesePatterns = [
+      /^[a-z0-9]+(yiwu|china|cn|beijing|shanghai|shen[zs]hen|guang[zs]hou|hang[zs]hou|ningbo)[a-z0-9]*$/i,
+      /^cn[-_]?\w+/i,
+      /^zh[-_]?\w+/i,
+      /^china[-_]?\w+/i,
+      /\w+[-_]?cn$/i,
+      /\w+[-_]?zh$/i,
+      /\w+[-_]?china$/i,
+      /^[a-z]+(?:trading|store|shop|tech|electronics|home|official|direct|factory|wholesale|mall)\d*$/i,
+    ];
+    
+    for (const pattern of chinesePatterns) {
+      if (pattern.test(normalizedName)) {
+        features.push('特征命名模式');
+        break;
+      }
+    }
+    
+    // 检查卖家详细信息（如果有）
+    if (sellerInfo) {
+      // 检查是否已确认为中国卖家
+      if (sellerInfo.isConfirmedChinese) {
+        features.push('已确认为中国卖家');
+      }
+      
+      // 检查卖家国家
+      if (sellerInfo.sellerCountry === 'China') {
+        features.push('国家为中国');
+      }
+      
+      // 检查企业名称中是否包含中国特征
+      if (sellerInfo.businessName) {
+        if (/[\u4e00-\u9fff]/.test(sellerInfo.businessName)) {
+          features.push('企业名称包含中文');
+        }
+        if (/(shenzhen|guangzhou|shanghai|beijing|china)/i.test(sellerInfo.businessName)) {
+          features.push('企业名称包含中国地名');
+        }
+      }
+      
+      // 检查企业地址
+      if (sellerInfo.businessAddress) {
+        if (/[\u4e00-\u9fff]/.test(sellerInfo.businessAddress)) {
+          features.push('企业地址包含中文');
+        }
+        if (/(china|cn|中国|广东|浙江|深圳|上海|北京)/i.test(sellerInfo.businessAddress)) {
+          features.push('企业地址位于中国');
+        }
+      }
+    }
+    
+    return features;
+  } catch (error) {
+    console.error('分析卖家特征时出错:', error);
+    return [];
+  }
+}
+
+// 更新卖家列表面板
+function updateSellerListInPanel(cardId, sellerName, asin) {
+  try {
+    // 查找或创建卖家列表
+    let sellerList = document.getElementById('cn-seller-list');
+    
+    // 如果列表不存在但面板存在，则在面板中创建列表
+    if (!sellerList) {
+      const panel = document.getElementById('seller-detail-panel');
+      if (panel) {
+        sellerList = document.createElement('div');
+        sellerList.id = 'cn-seller-list';
+        sellerList.style.fontSize = '14px';
+        
+        const sellerListContainer = panel.querySelector('#seller-list-container') || panel;
+        sellerListContainer.appendChild(sellerList);
+      } else {
+        // 如果面板不存在，无法更新列表
+        return false;
+      }
+    }
+    
+    // 检查该卖家是否已在列表中
+    const existingItem = document.getElementById(`seller-list-item-${asin}`);
+    if (existingItem) {
+      return true; // 已存在，不重复添加
+    }
+    
+    // 创建新的卖家列表项
+    const listItem = document.createElement('div');
+    listItem.id = `seller-list-item-${asin}`;
+    listItem.className = 'seller-list-item';
+    listItem.style.padding = '8px 10px';
+    listItem.style.borderBottom = '1px solid #eee';
+    listItem.style.cursor = 'pointer';
+    listItem.style.transition = 'all 0.2s';
+    
+    // 高亮当前选择的卖家
+    if (document.getElementById('seller-detail-panel')?.getAttribute('data-current-asin') === asin) {
+      listItem.style.backgroundColor = '#fff0f5';
+    }
+    
+    // 添加鼠标悬停效果
+    listItem.addEventListener('mouseenter', () => {
+      listItem.style.backgroundColor = '#fff0f5';
+    });
+    
+    listItem.addEventListener('mouseleave', () => {
+      if (document.getElementById('seller-detail-panel')?.getAttribute('data-current-asin') !== asin) {
+        listItem.style.backgroundColor = 'transparent';
+      }
+    });
+    
+    // 点击跳转到对应的商品卡片
+    listItem.addEventListener('click', () => {
+      const targetCard = document.getElementById(cardId);
+      if (targetCard) {
+        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 高亮闪烁效果
+        targetCard.style.animation = 'highlight-pulse 1s 3';
+      }
+      
+      // 更新当前选中的卖家
+      const panel = document.getElementById('seller-detail-panel');
+      if (panel) {
+        panel.setAttribute('data-current-asin', asin);
+        
+        // 更新所有列表项的背景色
+        const allItems = document.querySelectorAll('.seller-list-item');
+        allItems.forEach(item => {
+          item.style.backgroundColor = 'transparent';
+        });
+        
+        // 高亮当前选中项
+        listItem.style.backgroundColor = '#fff0f5';
+      }
+    });
+    
+    // 设置列表项内容
+    listItem.textContent = sellerName.length > 30 ? sellerName.substring(0, 30) + '...' : sellerName;
+    listItem.title = sellerName;
+    
+    // 添加到列表
+    sellerList.appendChild(listItem);
+    
+    return true;
+  } catch (error) {
+    console.error('[列表] 更新卖家列表时出错:', error);
+    return false;
+  }
+}
+
+// 查找产品卡片的父容器
+function findProductCardParent(card) {
+  try {
+    if (!card) return null;
+    
+    // 尝试查找合适的父容器
+    // 首先尝试最近的带有一些常见产品卡片类或属性的父元素
+    let parent = card;
+    
+    // 按照常见的产品卡片容器类名向上查找
+    const commonParentSelectors = [
+      'data-component-type="s-search-result"',
+      'data-asin',
+      'data-uuid',
+      'data-component-id',
+      'class="s-result-item"',
+      'class="sg-col-4-of-12"',
+      'class="sg-col-4-of-16"',
+      'class="a-section"'
+    ];
+    
+    // 只向上查找最多5层，避免过度查找
+    let depth = 0;
+    while (parent && depth < 5) {
+      let foundMatch = false;
+      
+      // 检查当前元素是否有匹配的选择器
+      for (const selector of commonParentSelectors) {
+        const attributeName = selector.split("=")[0].trim();
+        const attributeValue = selector.split("=")[1]?.replace(/"/g, '').trim();
+        
+        if (attributeValue) {
+          // 如果是类名选择器
+          if (attributeName === 'class') {
+            if (parent.classList.contains(attributeValue)) {
+              foundMatch = true;
+              break;
+            }
+          } else if (parent.hasAttribute(attributeName)) {
+            // 如果是其他属性选择器
+            foundMatch = true;
             break;
           }
         }
-      } catch (titleError) {
-        console.error('标记产品标题时出错:', titleError);
       }
       
-      console.log('中国卖家产品卡片标记完成');
-    } catch (markerError) {
-      console.error('创建卖家标记时出错:', markerError);
+      if (foundMatch) {
+        return parent;
+      }
+      
+      // 向上找父元素
+      if (parent.parentElement) {
+        parent = parent.parentElement;
+        depth++;
+      } else {
+        break;
+      }
     }
+    
+    // 如果没有找到合适的父容器，返回原始元素
+    return card;
   } catch (error) {
-    console.error('标记中国卖家产品时出错:', error);
+    console.error('[查找] 查找产品卡片父容器时出错:', error);
+    return card;
+  }
+}
+
+// 显示扫描完成统计数据面板
+function showScanCompletedPanel(stats) {
+  try {
+    console.log('[完成] 显示扫描完成统计面板');
+    
+    // 移除可能已存在的完成面板
+    const existingPanel = document.getElementById('scan-completed-panel');
+    if (existingPanel) {
+      existingPanel.remove();
+    }
+    
+    // 获取统计数据
+    const totalProcessed = stats.totalProcessed || 0;
+    const chineseSellerCount = stats.chineseSellerCount || 0;
+    const percentage = stats.percentage || 0;
+    
+    // 创建面板
+    const panel = document.createElement('div');
+    panel.id = 'scan-completed-panel';
+    panel.style.position = 'fixed';
+    panel.style.top = '50%';
+    panel.style.left = '50%';
+    panel.style.transform = 'translate(-50%, -50%) scale(0.9)';
+    panel.style.backgroundColor = 'white';
+    panel.style.borderRadius = '10px';
+    panel.style.boxShadow = '0 0 30px rgba(0, 0, 0, 0.5)';
+    panel.style.padding = '25px';
+    panel.style.minWidth = '350px';
+    panel.style.maxWidth = '450px';
+    panel.style.zIndex = '10000';
+    panel.style.opacity = '0';
+    panel.style.transition = 'all 0.3s ease-out';
+    panel.style.border = '3px solid var(--highlight-color, #ff0055)';
+    panel.style.textAlign = 'center';
+    panel.style.fontFamily = 'Arial, sans-serif';
+    
+    // 标题
+    const title = document.createElement('h2');
+    title.textContent = '扫描完成';
+    title.style.color = 'var(--highlight-color, #ff0055)';
+    title.style.margin = '0 0 20px 0';
+    title.style.fontSize = '22px';
+    panel.appendChild(title);
+    
+    // 结果图标
+    const resultIcon = document.createElement('div');
+    resultIcon.innerHTML = chineseSellerCount > 0 ? 
+      '<div style="font-size: 48px; margin: 10px 0;">🔍</div>' : 
+      '<div style="font-size: 48px; margin: 10px 0;">✅</div>';
+    panel.appendChild(resultIcon);
+    
+    // 结果文本
+    const resultText = document.createElement('div');
+    resultText.style.fontSize = '18px';
+    resultText.style.margin = '10px 0 20px 0';
+    resultText.style.fontWeight = 'bold';
+    
+    if (chineseSellerCount > 0) {
+      resultText.textContent = `发现了 ${chineseSellerCount} 个中国卖家`;
+      resultText.style.color = 'var(--highlight-color, #ff0055)';
+    } else {
+      resultText.textContent = '没有发现中国卖家';
+      resultText.style.color = '#4caf50';
+    }
+    panel.appendChild(resultText);
+    
+    // 详细统计信息
+    const statsContainer = document.createElement('div');
+    statsContainer.style.backgroundColor = '#f8f8f8';
+    statsContainer.style.borderRadius = '5px';
+    statsContainer.style.padding = '15px';
+    statsContainer.style.margin = '10px 0 20px 0';
+    statsContainer.style.textAlign = 'left';
+    statsContainer.style.fontSize = '14px';
+    statsContainer.style.lineHeight = '1.6';
+    
+    statsContainer.innerHTML = `
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span>总共扫描:</span>
+        <span>${totalProcessed} 个产品</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span>中国卖家:</span>
+        <span style="color: var(--highlight-color, #ff0055); font-weight: bold;">
+          ${chineseSellerCount} 个
+        </span>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span>占比:</span>
+        <span style="font-weight: bold;">${percentage}%</span>
+      </div>
+    `;
+    panel.appendChild(statsContainer);
+    
+    // 按钮容器
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.justifyContent = 'space-between';
+    buttonContainer.style.marginTop = '15px';
+    
+    // 返回按钮
+    const closeButton = document.createElement('button');
+    closeButton.textContent = '关闭';
+    closeButton.className = 'scan-action-button close-button';
+    closeButton.addEventListener('click', () => {
+      panel.style.opacity = '0';
+      panel.style.transform = 'translate(-50%, -50%) scale(0.9)';
+      setTimeout(() => panel.remove(), 300);
+    });
+    
+    // 筛选按钮
+    const filterButton = document.createElement('button');
+    filterButton.textContent = chineseSellerCount > 0 ? '仅显示中国卖家' : '显示所有产品';
+    filterButton.className = 'scan-action-button filter-button';
+    filterButton.addEventListener('click', () => {
+      if (chineseSellerCount > 0) {
+        applyFilterMode('chinese');
+        settings.filterMode = 'chinese';
+      } else {
+        applyFilterMode('all');
+        settings.filterMode = 'all';
+      }
+      
+      // 保存设置
+      try {
+        if (chrome && chrome.storage && chrome.storage.sync) {
+          chrome.storage.sync.set({ filterMode: settings.filterMode });
+        }
+      } catch (error) {
+        console.error('[完成] 保存筛选设置时出错:', error);
+      }
+      
+      // 关闭面板
+      panel.style.opacity = '0';
+      panel.style.transform = 'translate(-50%, -50%) scale(0.9)';
+      setTimeout(() => panel.remove(), 300);
+    });
+    
+    // 添加按钮样式
+    const style = document.createElement('style');
+    style.textContent = `
+      .scan-action-button {
+        padding: 10px 16px;
+        border: none;
+        border-radius: 5px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 14px;
+      }
+      
+      .close-button {
+        background-color: #f0f0f0;
+        color: #333;
+      }
+      
+      .close-button:hover {
+        background-color: #e0e0e0;
+      }
+      
+      .filter-button {
+        background-color: var(--highlight-color, #ff0055);
+        color: white;
+      }
+      
+      .filter-button:hover {
+        filter: brightness(110%);
+      }
+    `;
+    document.head.appendChild(style);
+    
+    buttonContainer.appendChild(closeButton);
+    buttonContainer.appendChild(filterButton);
+    panel.appendChild(buttonContainer);
+    
+    // 添加到页面
+    document.body.appendChild(panel);
+    
+    // 显示动画
+    setTimeout(() => {
+      panel.style.opacity = '1';
+      panel.style.transform = 'translate(-50%, -50%) scale(1)';
+    }, 10);
+    
+    // 自动关闭面板（15秒后）
+    setTimeout(() => {
+      if (document.getElementById('scan-completed-panel')) {
+        panel.style.opacity = '0';
+        panel.style.transform = 'translate(-50%, -50%) scale(0.9)';
+        setTimeout(() => {
+          if (document.getElementById('scan-completed-panel')) {
+            panel.remove();
+          }
+        }, 300);
+      }
+    }, 15000);
+    
+    return panel;
+  } catch (error) {
+    console.error('[完成] 显示扫描完成面板时出错:', error);
+    return null;
+  }
+}
+
+// 获取当前页面上的产品卡片
+function getProductCards() {
+  try {
+    // 根据页面类型选择合适的选择器
+    const pageType = determinePageType();
+    let cardSelectors = [];
+    
+    if (pageType === 'search') {
+      // 搜索结果页面的产品卡片选择器
+      cardSelectors = [
+        '.s-result-item[data-component-type="s-search-result"]',
+        '.s-result-item:not(.AdHolder)',
+        '.sg-col-4-of-24.sg-col-4-of-12',
+        '.sg-col-4-of-20',
+        'div[data-asin]:not([data-asin=""])',
+        'div[data-uuid]:not([data-uuid=""])',
+        'div[data-component-type="s-search-result"]',
+        '.s-shopping-adviser',
+        // 新增选择器，处理更多情况
+        '.a-section.a-spacing-base',
+        '.octopus-pc-card',
+        '.octopus-search-result-card',
+        '.s-card-container',
+        '.a-cardui'
+      ];
+    } else {
+      // 其他页面类型的产品卡片选择器
+      cardSelectors = [
+        'div[data-asin]:not([data-asin=""])',
+        '.a-carousel-card',
+        '.a-section.aok-relative',
+        '[data-csa-c-item-id]',
+        // 新增选择器
+        '.a-section.a-spacing-medium',
+        '.p13n-grid-content',
+        '.p13n-sc-grid-item',
+        '.octopus-pc-item'
+      ];
+    }
+    
+    // 使用Set来保存唯一的产品卡片
+    const cardSet = new Set();
+    
+    // 尝试每个选择器
+    for (const selector of cardSelectors) {
+      const cards = document.querySelectorAll(selector);
+      
+      if (cards && cards.length > 0) {
+        console.log(`使用选择器 "${selector}" 找到 ${cards.length} 个产品卡片`);
+        
+        cards.forEach(card => {
+          // 确保元素有足够的内容，避免选中导航元素
+          if (
+            card.textContent.length > 50 &&
+            !card.classList.contains('AdHolder') &&
+            !card.classList.contains('amazon-prime-action-card') &&
+            !card.parentElement?.classList.contains('s-shopping-adviser-container')
+          ) {
+            cardSet.add(card);
+          }
+        });
+      }
+    }
+    
+    const uniqueCards = Array.from(cardSet);
+    console.log(`找到 ${uniqueCards.length} 个唯一产品卡片`);
+    
+    return uniqueCards;
+  } catch (error) {
+    console.error('获取产品卡片时出错:', error);
+    return [];
+  }
+}
+
+// 过滤可见的产品卡片
+function filterVisibleCards(cards) {
+  try {
+    const visibleCards = cards.filter(card => {
+      // 检查卡片是否在视口中或接近视口
+      const rect = card.getBoundingClientRect();
+      const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+      
+      // 卡片在视口中或在视口附近(上下300px内)
+      return (
+        (rect.top >= -300 && rect.top <= windowHeight + 300) ||
+        (rect.bottom >= -300 && rect.bottom <= windowHeight + 300) ||
+        (rect.top <= 0 && rect.bottom >= windowHeight)
+      );
+    });
+    
+    console.log(`从 ${cards.length} 个卡片中过滤出 ${visibleCards.length} 个可见卡片`);
+    return visibleCards;
+  } catch (error) {
+    console.error('过滤可见卡片时出错:', error);
+    return cards; // 出错时返回所有卡片
   }
 }
